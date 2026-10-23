@@ -146,6 +146,8 @@ data class WeykyUiState(
   val isNotificationPrivacyEnabled: Boolean = false,
   val isHeadsetButtonEnabled: Boolean = false,
   val currentEnglishDateString: String = "",
+  val pinnedAppPackageNames: List<String> = emptyList(),
+  val isStartMenuOpen: Boolean = false,
   val currentScreen: WeykyScreen = WeykyScreen.MAIN
 )
 
@@ -331,7 +333,16 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
         backgroundColorHex = bgHex,
         cardBorderColorHex = prefs.getLong("border_color_hex", 0xFF00F0FFL),
         cloudTtsVoiceName = prefs.getString("cloud_tts_voice", com.example.core.voice.engine.EdgeNeuralTtsEngine.DEFAULT_VOICE)
-          ?: com.example.core.voice.engine.EdgeNeuralTtsEngine.DEFAULT_VOICE
+          ?: com.example.core.voice.engine.EdgeNeuralTtsEngine.DEFAULT_VOICE,
+        pinnedAppPackageNames = prefs.getString("pinned_apps_packages", null)?.let { str ->
+          if (str.isBlank()) emptyList() else str.split(",").filter { it.isNotBlank() }
+        } ?: listOf(
+          "com.android.chrome",
+          "com.google.android.youtube",
+          "com.android.settings",
+          "com.google.android.dialer"
+        ),
+        isStartMenuOpen = false
       )
     }
   )
@@ -359,6 +370,7 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
     voicePipeline.prewarmInstalledOfflineModelAsync()
     viewModelScope.launch {
       appResolver.warmUpIndex()
+      refreshInstalledApps()
     }
   }
 
@@ -372,9 +384,7 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
     refreshTelemetry()
     viewModelScope.launch {
       appResolver.warmUpIndex()
-      if (_uiState.value.isAppDrawerOpen) {
-        refreshInstalledApps()
-      }
+      refreshInstalledApps()
     }
   }
 
@@ -408,12 +418,66 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
+  fun toggleStartMenu(open: Boolean? = null) {
+    val targetOpen = open ?: !_uiState.value.isStartMenuOpen
+    val apps = if (targetOpen && _uiState.value.installedApps.isEmpty()) {
+      appResolver.getInstalledLaunchableApps()
+    } else {
+      _uiState.value.installedApps
+    }
+    _uiState.update {
+      it.copy(
+        isStartMenuOpen = targetOpen,
+        installedApps = apps
+      )
+    }
+  }
+
+  fun pinApp(packageName: String) {
+    if (packageName.isBlank()) return
+    val current = _uiState.value.pinnedAppPackageNames
+    if (!current.contains(packageName)) {
+      val updated = current + packageName
+      _uiState.update { it.copy(pinnedAppPackageNames = updated) }
+      prefs.edit().putString("pinned_apps_packages", updated.joinToString(",")).apply()
+    }
+  }
+
+  fun unpinApp(packageName: String) {
+    if (packageName.isBlank()) return
+    val current = _uiState.value.pinnedAppPackageNames
+    if (current.contains(packageName)) {
+      val updated = current.filter { it != packageName }
+      _uiState.update { it.copy(pinnedAppPackageNames = updated) }
+      prefs.edit().putString("pinned_apps_packages", updated.joinToString(",")).apply()
+    }
+  }
+
+  fun togglePinApp(packageName: String) {
+    if (_uiState.value.pinnedAppPackageNames.contains(packageName)) {
+      unpinApp(packageName)
+    } else {
+      pinApp(packageName)
+    }
+  }
+
   fun launchApp(app: AppMatch): Boolean {
     val launched = appResolver.launchApp(app)
     if (launched) {
-      _uiState.update { it.copy(isAppDrawerOpen = false) }
+      _uiState.update { it.copy(isAppDrawerOpen = false, isStartMenuOpen = false) }
     }
     return launched
+  }
+
+  fun launchDialer() {
+    try {
+      val intent = Intent(Intent.ACTION_DIAL).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      context.startActivity(intent)
+    } catch (e: Exception) {
+      android.util.Log.e("WEYKY", "Cannot launch dialer", e)
+    }
   }
 
   fun createRequestRoleIntent(): Intent? = launcherRoleManager.createRequestRoleIntent()

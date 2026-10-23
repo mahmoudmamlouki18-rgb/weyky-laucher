@@ -49,13 +49,16 @@ class MainActivity : ComponentActivity() {
         }
 
         // Back button behavior adhering to Android Home launcher semantics
+        BackHandler(enabled = uiState.isStartMenuOpen) {
+          viewModel.toggleStartMenu(false)
+        }
         BackHandler(enabled = uiState.isAppDrawerOpen) {
           viewModel.toggleAppDrawer(false)
         }
         BackHandler(enabled = uiState.currentScreen == WeykyScreen.SETTINGS) {
           viewModel.navigateTo(WeykyScreen.MAIN)
         }
-        BackHandler(enabled = uiState.currentScreen == WeykyScreen.MAIN && !uiState.isAppDrawerOpen && uiState.launcherStatus.isDefaultLauncher) {
+        BackHandler(enabled = uiState.currentScreen == WeykyScreen.MAIN && !uiState.isAppDrawerOpen && !uiState.isStartMenuOpen && uiState.launcherStatus.isDefaultLauncher) {
           // In Default Launcher mode, Home surface is root; pressing Back does not finish activity
         }
 
@@ -93,7 +96,11 @@ class MainActivity : ComponentActivity() {
                 },
                 onToggleMediaPlayback = { viewModel.toggleMediaPlayback() },
                 onNextMediaTrack = { viewModel.skipToNextMediaTrack() },
-                onPreviousMediaTrack = { viewModel.skipToPreviousMediaTrack() }
+                onPreviousMediaTrack = { viewModel.skipToPreviousMediaTrack() },
+                onToggleStartMenu = { open -> viewModel.toggleStartMenu(open) },
+                onPinApp = { pkg -> viewModel.pinApp(pkg) },
+                onUnpinApp = { pkg -> viewModel.unpinApp(pkg) },
+                onCallClick = { viewModel.launchDialer() }
               )
             }
             WeykyScreen.SETTINGS -> {
