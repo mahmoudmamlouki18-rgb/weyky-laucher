@@ -13,65 +13,32 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Place
-import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.LayoutDirection
 import com.example.core.state.WeykyUiState
+import com.example.ui.home.weather.RealtimeSkyViewport
 import com.example.ui.theme.WeykyAdaptiveCard
 
 /**
- * Weather icon with sun peeking behind the cloud as depicted in the reference mockup.
- */
-@Composable
-fun ModernSunCloudIcon(
-  modifier: Modifier = Modifier
-) {
-  Box(
-    modifier = modifier.size(32.dp),
-    contentAlignment = Alignment.Center
-  ) {
-    Icon(
-      imageVector = Icons.Default.WbSunny,
-      contentDescription = null,
-      tint = Color(0xFFFBBF24),
-      modifier = Modifier
-        .size(16.dp)
-        .align(Alignment.TopEnd)
-    )
-    Icon(
-      imageVector = Icons.Default.CloudQueue,
-      contentDescription = "Partly Cloudy",
-      tint = Color(0xFFF1F5F9),
-      modifier = Modifier
-        .size(24.dp)
-        .align(Alignment.BottomStart)
-    )
-  }
-}
-
-/**
- * Modern Combined Date & Weather Card.
- * Matches exact visual details from the user's reference mockup:
- * - Left: Calendar squircle icon, Arabic date, English date.
- * - Center: Vertical hairline glass divider.
- * - Right: Sun+Cloud icon, Temperature (18°), condition, location pin + "الجزائر".
+ * Modern Combined Date & Weather Card in Portrait Mode.
+ * Fully represents the REAL-TIME appearance of the sky (sun/moon position, hour atmosphere,
+ * dynamic drifting cloud masses, precipitation particles) instead of a silent static icon.
  */
 @Composable
 fun ModernCombinedDateWeatherCard(
@@ -91,7 +58,7 @@ fun ModernCombinedDateWeatherCard(
     "18°"
   }
   val condition = weather?.condition?.ifBlank { null } ?: "غائم جزئياً"
-  val locationName = "الجزائر"
+  val locationName = weather?.locationName?.takeIf { it.isNotBlank() } ?: "الجزائر"
 
   val primaryDate = uiState.currentDateString.ifBlank { "الخميس، 22 أكتوبر" }
   val englishDate = uiState.currentEnglishDateString.ifBlank { "THURSDAY, 22 OCT" }
@@ -104,14 +71,15 @@ fun ModernCombinedDateWeatherCard(
       .fillMaxWidth()
       .testTag("modern_combined_date_weather_card")
   ) {
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+    // Natural Arabic RTL Alignment
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
       Row(
         modifier = Modifier
           .fillMaxWidth()
           .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
       ) {
-        // 1. DATE SECTION (Left side of card)
+        // 1. DATE SECTION (Right side in Arabic RTL)
         Row(
           modifier = Modifier.weight(1.05f),
           verticalAlignment = Alignment.CenterVertically,
@@ -120,14 +88,14 @@ fun ModernCombinedDateWeatherCard(
           // Squircle Calendar Icon Container
           Box(
             modifier = Modifier
-              .size(42.dp)
+              .size(44.dp)
               .clip(RoundedCornerShape(12.dp))
               .background(Color(0x2800D2FF)),
             contentAlignment = Alignment.Center
           ) {
             Icon(
               imageVector = Icons.Default.DateRange,
-              contentDescription = "Date",
+              contentDescription = "التاريخ",
               tint = Color(0xFF00D2FF),
               modifier = Modifier.size(22.dp)
             )
@@ -160,19 +128,22 @@ fun ModernCombinedDateWeatherCard(
           modifier = Modifier
             .padding(horizontal = 10.dp)
             .width(1.dp)
-            .height(38.dp)
-            .background(Color(0x2800D2FF))
+            .height(42.dp)
+            .background(borderColor.copy(alpha = 0.25f))
         )
 
-        // 2. WEATHER SECTION (Right side of card)
+        // 2. REAL-TIME SKY WEATHER SECTION (Left side in Arabic RTL)
         Row(
-          modifier = Modifier.weight(1f),
+          modifier = Modifier.weight(1.15f),
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          // Sun + Cloud Icon
-          ModernSunCloudIcon(
-            modifier = Modifier.size(38.dp)
+          // Real-time living sky window representing actual sky appearance
+          RealtimeSkyViewport(
+            weather = weather,
+            modifier = Modifier.size(46.dp),
+            shape = RoundedCornerShape(12.dp),
+            borderColor = borderColor.copy(alpha = 0.55f)
           )
 
           Column(verticalArrangement = Arrangement.Center) {
@@ -198,7 +169,7 @@ fun ModernCombinedDateWeatherCard(
             ) {
               Icon(
                 imageVector = Icons.Default.Place,
-                contentDescription = "Location",
+                contentDescription = "الموقع",
                 tint = Color(0xFF00D2FF),
                 modifier = Modifier.size(11.dp)
               )

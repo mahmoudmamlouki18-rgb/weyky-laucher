@@ -74,8 +74,8 @@ data class WeatherSnapshot(
   val dailyForecast: List<DailyForecastItem> = emptyList(),
 
   // Metadata
-  val locationName: String?,
-  val isAvailable: Boolean,
+  val locationName: String? = null,
+  val isAvailable: Boolean = true,
   val isCached: Boolean = false,
   val statusMessage: String? = null,
   val lastUpdatedMillis: Long = System.currentTimeMillis()

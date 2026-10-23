@@ -2,6 +2,8 @@ package com.example.ui.home
 
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import com.example.ui.home.weather.RealtimeSkyViewport
+import com.example.ui.home.weather.WeatherAdaptiveCoreLayer
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -251,20 +253,12 @@ fun HomeWeatherCard(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      Box(
-        modifier = Modifier
-          .size(40.dp)
-          .clip(if (isMinimal) RoundedCornerShape(12.dp) else CircleShape)
-          .background(if (isMinimal) Color(0xFF152230) else borderColor.copy(alpha = 0.12f)),
-        contentAlignment = Alignment.Center
-      ) {
-        Icon(
-          imageVector = Icons.Default.CloudQueue,
-          contentDescription = "Weather",
-          tint = if (isMinimal) Color(0xFF7A8B9E) else borderColor,
-          modifier = Modifier.size(24.dp)
-        )
-      }
+      RealtimeSkyViewport(
+        weather = weather,
+        modifier = Modifier.size(if (isCompact) 40.dp else 46.dp),
+        shape = if (isMinimal) RoundedCornerShape(12.dp) else CutCornerShape(6.dp),
+        borderColor = borderColor.copy(alpha = 0.5f)
+      )
 
       Column(modifier = Modifier.weight(1f)) {
         Text(
@@ -1088,11 +1082,11 @@ fun HomeTelemetryCard(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
       ) {
-        Icon(
-          imageVector = Icons.Default.CloudQueue,
-          contentDescription = "Weather",
-          tint = borderColor,
-          modifier = Modifier.size(if (isCompact) 20.dp else 24.dp)
+        RealtimeSkyViewport(
+          weather = weather,
+          modifier = Modifier.size(if (isCompact) 28.dp else 34.dp),
+          shape = CutCornerShape(4.dp),
+          borderColor = borderColor.copy(alpha = 0.5f)
         )
         Spacer(modifier = Modifier.width(4.dp))
         Column(horizontalAlignment = Alignment.Start) {
@@ -1964,18 +1958,23 @@ fun HomeCoreSection(
         coreSizeDp
       }
 
-      WeykyCoreView(
-        visualState = uiState.visualState,
-        sizeDp = adaptiveSize.coerceAtLeast(48.dp),
-        isPowerSaving = uiState.isPowerSaving,
-        isVoiceListening = uiState.isVoiceListening,
-        isSpeakingAloud = uiState.isSpeakingAloud,
-        isMusicPlaying = uiState.isMusicPlaying,
-        isCharging = isDeviceCharging,
-        batteryPercentage = currentBatteryPct,
-        voiceEnergyLevel = uiState.voiceEnergyLevel,
-        onClick = onToggleVoice
-      )
+      WeatherAdaptiveCoreLayer(
+        uiState = uiState,
+        coreSizeDp = adaptiveSize.coerceAtLeast(48.dp)
+      ) {
+        WeykyCoreView(
+          visualState = uiState.visualState,
+          sizeDp = adaptiveSize.coerceAtLeast(48.dp),
+          isPowerSaving = uiState.isPowerSaving,
+          isVoiceListening = uiState.isVoiceListening,
+          isSpeakingAloud = uiState.isSpeakingAloud,
+          isMusicPlaying = uiState.isMusicPlaying,
+          isCharging = isDeviceCharging,
+          batteryPercentage = currentBatteryPct,
+          voiceEnergyLevel = uiState.voiceEnergyLevel,
+          onClick = onToggleVoice
+        )
+      }
     }
   }
 }
