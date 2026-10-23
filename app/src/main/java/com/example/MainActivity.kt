@@ -100,7 +100,15 @@ class MainActivity : ComponentActivity() {
                 onToggleStartMenu = { open -> viewModel.toggleStartMenu(open) },
                 onPinApp = { pkg -> viewModel.pinApp(pkg) },
                 onUnpinApp = { pkg -> viewModel.unpinApp(pkg) },
-                onCallClick = { viewModel.launchDialer() }
+                onCallClick = { viewModel.launchDialer() },
+                onLaunchMusicApp = { viewModel.launchMusicApp() },
+                onNetworkClick = { viewModel.announceNetwork() },
+                onNetworkLongClick = { viewModel.launchWirelessSettings() },
+                onBatteryClick = { viewModel.announceBattery() },
+                onTimeClick = { viewModel.announceTime() },
+                onDateClick = { viewModel.announceDate() },
+                onWeatherClick = { viewModel.announceWeather() },
+                onLocationClick = { viewModel.announceLocation() }
               )
             }
             WeykyScreen.SETTINGS -> {

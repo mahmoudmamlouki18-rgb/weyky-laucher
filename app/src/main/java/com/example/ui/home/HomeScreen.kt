@@ -65,6 +65,14 @@ fun HomeScreen(
   onPinApp: (String) -> Unit = {},
   onUnpinApp: (String) -> Unit = {},
   onCallClick: () -> Unit = {},
+  onLaunchMusicApp: () -> Unit = {},
+  onNetworkClick: () -> Unit = {},
+  onNetworkLongClick: () -> Unit = {},
+  onBatteryClick: () -> Unit = {},
+  onTimeClick: () -> Unit = {},
+  onDateClick: () -> Unit = {},
+  onWeatherClick: () -> Unit = {},
+  onLocationClick: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val keyboardController = LocalSoftwareKeyboardController.current
@@ -120,6 +128,14 @@ fun HomeScreen(
         onToggleMediaPlayback = onToggleMediaPlayback,
         onNextMediaTrack = onNextMediaTrack,
         onPreviousMediaTrack = onPreviousMediaTrack,
+        onLaunchMusicApp = onLaunchMusicApp,
+        onNetworkClick = onNetworkClick,
+        onNetworkLongClick = onNetworkLongClick,
+        onBatteryClick = onBatteryClick,
+        onTimeClick = onTimeClick,
+        onDateClick = onDateClick,
+        onWeatherClick = onWeatherClick,
+        onLocationClick = onLocationClick,
         keyboardController = keyboardController
       )
     } else {

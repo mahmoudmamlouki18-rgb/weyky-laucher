@@ -69,6 +69,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -863,14 +864,27 @@ private fun MinimalThemeSettingsSection(
                   .padding(6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
               ) {
-                // Procedural Preview Thumbnail
+                // Preview Thumbnail (Image or Procedural)
                 Box(
                   modifier = Modifier
                     .fillMaxWidth()
                     .height(80.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .drawBehind { preset.drawBackground(this) }
                 ) {
+                  if (preset.drawableResId != null) {
+                    Image(
+                      painter = painterResource(id = preset.drawableResId),
+                      contentDescription = preset.titleAr,
+                      contentScale = ContentScale.Crop,
+                      modifier = Modifier.fillMaxSize()
+                    )
+                  } else {
+                    Box(
+                      modifier = Modifier
+                        .fillMaxSize()
+                        .drawBehind { preset.drawBackground(this) }
+                    )
+                  }
                   // Favorite Heart Button
                   IconButton(
                     onClick = { onToggleFavoriteWallpaper(preset.id) },

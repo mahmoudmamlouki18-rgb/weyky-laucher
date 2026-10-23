@@ -164,4 +164,40 @@ class DesktopTaskbarAndModeTest {
     org.junit.Assert.assertNotNull(nextIntent)
     assertEquals(android.content.Intent.ACTION_DIAL, nextIntent.action)
   }
+
+  @Test
+  fun `announceBattery updates lastResponseText and speaks status`() {
+    val viewModel = WeykyViewModel(application)
+    viewModel.announceBattery()
+    val text = viewModel.uiState.value.lastResponseText
+    org.junit.Assert.assertNotNull(text)
+    assertTrue("Response must contain battery percent", text!!.contains("مستوى شحن البطارية"))
+  }
+
+  @Test
+  fun `announceTime updates lastResponseText and speaks time`() {
+    val viewModel = WeykyViewModel(application)
+    viewModel.announceTime()
+    val text = viewModel.uiState.value.lastResponseText
+    org.junit.Assert.assertNotNull(text)
+    assertTrue("Response must contain time prompt", text!!.contains("الوقت الآن"))
+  }
+
+  @Test
+  fun `announceWeather and announceLocation vocalize information to Core`() {
+    val viewModel = WeykyViewModel(application)
+    viewModel.announceWeather()
+    val weatherText = viewModel.uiState.value.lastResponseText
+    org.junit.Assert.assertNotNull(weatherText)
+
+    viewModel.announceLocation()
+    val locText = viewModel.uiState.value.lastResponseText
+    org.junit.Assert.assertNotNull(locText)
+  }
+
+  @Test
+  fun `launchMusicApp executes safely without crashing`() {
+    val viewModel = WeykyViewModel(application)
+    viewModel.launchMusicApp()
+  }
 }

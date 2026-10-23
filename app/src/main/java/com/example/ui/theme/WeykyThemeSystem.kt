@@ -1,9 +1,11 @@
 package com.example.ui.theme
 
+import androidx.annotation.DrawableRes
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.example.R
 
 /**
  * WEYKY Integrated Three-Theme System Modes:
@@ -105,7 +107,8 @@ data class OfflineWallpaperPreset(
   val titleAr: String,
   val category: WallpaperCategory,
   val previewGradient: List<Color>,
-  val drawBackground: DrawScope.() -> Unit
+  @DrawableRes val drawableResId: Int? = null,
+  val drawBackground: DrawScope.() -> Unit = {}
 )
 
 /**
@@ -113,6 +116,43 @@ data class OfflineWallpaperPreset(
  */
 object OfflineWallpaperCatalog {
   val presets: List<OfflineWallpaperPreset> = listOf(
+    // 0. VIBRANT 4K COLORFUL MASTERPIECES (خلفيات ملونة بدقة عالية 4K)
+    OfflineWallpaperPreset(
+      id = "neon_fluid_4k",
+      titleAr = "أمواج النيون السائلة 4K",
+      category = WallpaperCategory.ABSTRACT,
+      previewGradient = listOf(Color(0xFFE94057), Color(0xFF8A2387), Color(0xFF00D2FF), Color(0xFFF72585)),
+      drawableResId = R.drawable.img_wallpaper_neon_fluid
+    ),
+    OfflineWallpaperPreset(
+      id = "cosmic_nebula_4k",
+      titleAr = "سديم نيون كوني 4K",
+      category = WallpaperCategory.COSMIC,
+      previewGradient = listOf(Color(0xFF3C096C), Color(0xFF7209B7), Color(0xFF00ADB5), Color(0xFFFFD166)),
+      drawableResId = R.drawable.img_wallpaper_cosmic_nebula
+    ),
+    OfflineWallpaperPreset(
+      id = "prismatic_waves_4k",
+      titleAr = "أطياف موشورية ملونة 4K",
+      category = WallpaperCategory.ABSTRACT,
+      previewGradient = listOf(Color(0xFF00ADB5), Color(0xFFF72585), Color(0xFFFFB703), Color(0xFF7209B7)),
+      drawableResId = R.drawable.img_wallpaper_prismatic_waves
+    ),
+    OfflineWallpaperPreset(
+      id = "chromatic_smoke_4k",
+      titleAr = "انفجار لوني حبري 4K",
+      category = WallpaperCategory.DARK,
+      previewGradient = listOf(Color(0xFF00ADB5), Color(0xFFF72585), Color(0xFFFF5722), Color(0xFF030712)),
+      drawableResId = R.drawable.img_wallpaper_chromatic_smoke
+    ),
+    OfflineWallpaperPreset(
+      id = "neon_cyberpunk_4k",
+      titleAr = "بلورات سايبربانك 4K",
+      category = WallpaperCategory.ARCHITECTURAL,
+      previewGradient = listOf(Color(0xFF7209B7), Color(0xFF00F0FF), Color(0xFFFF007F), Color(0xFF020617)),
+      drawableResId = R.drawable.img_wallpaper_neon_cyberpunk
+    ),
+
     // 1. COSMIC (فضائي)
     OfflineWallpaperPreset(
       id = "cosmic_nebula",

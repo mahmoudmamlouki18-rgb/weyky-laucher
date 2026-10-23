@@ -253,6 +253,38 @@ fun Modifier.weykyScreenBackground(
 
         MinimalBackgroundType.WALLPAPER_PRESET -> {
           val preset = OfflineWallpaperCatalog.findById(uiState.minimalPresetId)
+          if (preset.drawableResId != null) {
+            val bitmap = remember(preset.drawableResId) {
+              try {
+                BitmapFactory.decodeResource(context.resources, preset.drawableResId)
+              } catch (e: Exception) {
+                null
+              }
+            }
+            if (bitmap != null) {
+              val imageBitmap = bitmap.asImageBitmap()
+              return this.drawBehind {
+                val srcW = imageBitmap.width.toFloat()
+                val srcH = imageBitmap.height.toFloat()
+                val canvasW = size.width
+                val canvasH = size.height
+                val scale = maxOf(canvasW / srcW, canvasH / srcH)
+                val scaledW = srcW * scale
+                val scaledH = srcH * scale
+                val offsetX = (canvasW - scaledW) / 2f
+                val offsetY = (canvasH - scaledH) / 2f
+
+                drawImage(
+                  image = imageBitmap,
+                  dstOffset = androidx.compose.ui.unit.IntOffset(offsetX.toInt(), offsetY.toInt()),
+                  dstSize = androidx.compose.ui.unit.IntSize(scaledW.toInt(), scaledH.toInt())
+                )
+                if (dimAlpha > 0f) {
+                  drawRect(Color.Black.copy(alpha = dimAlpha))
+                }
+              }
+            }
+          }
           return this
             .drawBehind {
               preset.drawBackground(this)

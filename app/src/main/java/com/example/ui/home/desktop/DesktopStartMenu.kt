@@ -229,7 +229,7 @@ fun DesktopStartMenu(
           onValueChange = { searchQuery = it },
           placeholder = {
             Text(
-              text = "بحث في التطبيقات... (Search apps)",
+              text = "بحث في التطبيقات...",
               fontSize = 12.sp,
               color = textMuted
             )

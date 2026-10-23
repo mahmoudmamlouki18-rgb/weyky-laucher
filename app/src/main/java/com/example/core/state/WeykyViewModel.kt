@@ -115,7 +115,7 @@ data class WeykyUiState(
   val dayNightMode: com.example.ui.theme.DayNightMode = com.example.ui.theme.DayNightMode.AUTO,
   val minimalBgType: com.example.ui.theme.MinimalBackgroundType = com.example.ui.theme.MinimalBackgroundType.DEFAULT,
   val minimalImagePath: String? = null,
-  val minimalPresetId: String = "cosmic_nebula",
+  val minimalPresetId: String = "neon_fluid_4k",
   val minimalSolidColorHex: Long = 0xFF0A0A0AL,
   val minimalGradientStartHex: Long = 0xFF0F2027L,
   val minimalGradientEndHex: Long = 0xFF2C5364L,
@@ -322,7 +322,7 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
         dayNightMode = savedDayNight,
         minimalBgType = com.example.ui.theme.MinimalBackgroundType.fromId(prefs.getString("minimal_bg_type", "default") ?: "default"),
         minimalImagePath = prefs.getString("minimal_image_path", null),
-        minimalPresetId = prefs.getString("minimal_preset_id", "cosmic_nebula") ?: "cosmic_nebula",
+        minimalPresetId = prefs.getString("minimal_preset_id", "neon_fluid_4k") ?: "neon_fluid_4k",
         minimalSolidColorHex = prefs.getLong("minimal_solid_color", 0xFF0A0A0AL),
         minimalGradientStartHex = prefs.getLong("minimal_grad_start", 0xFF0F2027L),
         minimalGradientEndHex = prefs.getLong("minimal_grad_end", 0xFF2C5364L),
@@ -477,6 +477,126 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
       context.startActivity(intent)
     } catch (e: Exception) {
       android.util.Log.e("WEYKY", "Cannot launch dialer", e)
+    }
+  }
+
+  fun announceInfo(speechText: String, displayText: String = speechText) {
+    viewModelScope.launch {
+      speechSynthesizer.stopIfSpeaking()
+      _uiState.update {
+        it.copy(
+          lastResponseText = displayText,
+          visualState = CoreVisualState.RESPONDING
+        )
+      }
+      speakResponse(speechText)
+      scheduleVisualStateReset(4500)
+      scheduleResponseAutoDismiss(7000L)
+    }
+  }
+
+  fun announceBattery() {
+    val battery = _uiState.value.batterySnapshot
+    val percentage = battery?.percentage ?: 100
+    val isCharging = battery?.chargingState == com.example.device.battery.ChargingState.CHARGING ||
+      battery?.chargingState == com.example.device.battery.ChargingState.FULL
+    val status = if (isCharging) "وهي قيد الشحن حالياً" else "وهي غير متصلة بالشاحن"
+    val text = "مستوى شحن البطارية هو $percentage بالمئة، $status."
+    announceInfo(text)
+  }
+
+  fun announceTime() {
+    val time = _uiState.value.currentTimeString.ifBlank { "غير محدد" }
+    val text = "الوقت الآن هو $time."
+    announceInfo(text)
+  }
+
+  fun announceDate() {
+    val date = _uiState.value.currentDateString.ifBlank { "اليوم" }
+    val text = "اليوم هو $date."
+    announceInfo(text)
+  }
+
+  fun announceWeather() {
+    val weather = _uiState.value.weatherSnapshot
+    val temp = weather?.temperatureCelsius?.toInt()
+    val cond = weather?.condition ?: "معتدل"
+    val loc = weather?.locationName?.takeIf { it.isNotBlank() } ?: "موقعك الحالي"
+    val text = if (temp != null) {
+      "الطقس في $loc: درجة الحرارة $temp مئوية، والحالة $cond."
+    } else {
+      "حالة الطقس الحالية: $cond."
+    }
+    announceInfo(text)
+  }
+
+  fun announceLocation() {
+    val loc = _uiState.value.weatherSnapshot?.locationName?.takeIf { it.isNotBlank() }
+    val text = if (loc != null) {
+      "موقعك الجغرافي الحالي هو: $loc."
+    } else {
+      "جاري تحديد وتحديث موقعك الجغرافي."
+    }
+    announceInfo(text)
+  }
+
+  fun announceNetwork() {
+    val net = _uiState.value.networkSnapshot
+    val isConnected = net?.isConnected == true
+    val type = when (net?.type) {
+      com.example.device.network.NetworkType.WIFI -> "واي فاي"
+      com.example.device.network.NetworkType.CELLULAR -> "بيانات الهاتف المحمول"
+      com.example.device.network.NetworkType.ETHERNET -> "إيثرنت"
+      else -> net?.typeLabel ?: "شبكة محلية"
+    }
+    val text = if (isConnected) "أنت متصل بالإنترنت حالياً عبر $type." else "أنت غير متصل بالإنترنت حالياً."
+    announceInfo(text)
+  }
+
+  fun launchMusicApp() {
+    val meta = _uiState.value.activeMediaMetadata
+    val pkg = meta?.packageName
+    if (!pkg.isNullOrBlank()) {
+      val intent = context.packageManager.getLaunchIntentForPackage(pkg)
+      if (intent != null) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        return
+      }
+    }
+    try {
+      val musicIntent = Intent(Intent.ACTION_MAIN).apply {
+        addCategory(Intent.CATEGORY_APP_MUSIC)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      context.startActivity(musicIntent)
+    } catch (_: Exception) {
+      try {
+        val mediaIntent = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(mediaIntent)
+      } catch (_: Exception) {
+        announceInfo("مشغل الموسيقى جاهز لتشغيل المقاطع الصوتية.")
+      }
+    }
+  }
+
+  fun launchWirelessSettings() {
+    try {
+      val intent = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      context.startActivity(intent)
+    } catch (_: Exception) {
+      try {
+        val intent = Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+      } catch (_: Exception) {
+        announceNetwork()
+      }
     }
   }
 
@@ -1362,7 +1482,7 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
   fun restoreMinimalDefaultBackground() {
     prefs.edit()
       .putString("minimal_bg_type", com.example.ui.theme.MinimalBackgroundType.DEFAULT.id)
-      .putString("minimal_preset_id", "cosmic_nebula")
+      .putString("minimal_preset_id", "neon_fluid_4k")
       .putFloat("minimal_dim_alpha", 0.45f)
       .apply()
     _uiState.update {
