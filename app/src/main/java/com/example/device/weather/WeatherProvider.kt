@@ -111,44 +111,53 @@ class RealWeatherProvider(
   @Volatile
   private var cachedWeather: WeatherSnapshot? = null
 
+  @Volatile
+  private var cachedCoordKey: String? = null
+
+  @Volatile
+  private var cachedAreaName: String? = null
+
   override fun getCachedWeather(): WeatherSnapshot? = cachedWeather
 
   override suspend fun fetchWeather(): WeatherSnapshot = withContext(Dispatchers.IO) {
     val locResult = locationProvider.getCurrentLocation()
     val coords = when (locResult) {
-      is LocationResult.PermissionRequired -> {
-        return@withContext cachedWeather?.copy(isCached = true)
-          ?: WeatherSnapshot(
-            temperatureCelsius = null,
-            condition = null,
-            locationName = null,
-            isAvailable = false,
-            statusMessage = "الطقس: يحتاج صلاحية الموقع"
-          )
-      }
-      is LocationResult.LocationDisabledOrUnavailable -> {
-        return@withContext cachedWeather?.copy(isCached = true)
-          ?: WeatherSnapshot(
-            temperatureCelsius = null,
-            condition = null,
-            locationName = null,
-            isAvailable = false,
-            statusMessage = "الطقس: الموقع غير متاح"
-          )
-      }
       is LocationResult.Success -> locResult.location
+      is LocationResult.PermissionRequired,
+      is LocationResult.LocationDisabledOrUnavailable -> {
+        val ipFallback = fetchIpBasedLocation()
+        if (ipFallback != null) {
+          ipFallback
+        } else {
+          val msg = if (locResult is LocationResult.PermissionRequired) {
+            "الطقس: يحتاج صلاحية الموقع"
+          } else {
+            "الطقس: الموقع غير متاح"
+          }
+          return@withContext cachedWeather?.copy(isCached = true)
+            ?: WeatherSnapshot(
+              temperatureCelsius = null,
+              condition = null,
+              locationName = cachedAreaName,
+              isAvailable = false,
+              statusMessage = msg
+            )
+        }
+      }
     }
 
     var connection: HttpURLConnection? = null
     try {
-      val lat = String.format(Locale.US, "%.4f", coords.latitude)
-      val lon = String.format(Locale.US, "%.4f", coords.longitude)
+      val lat = String.format(Locale.US, "%.6f", coords.latitude)
+      val lon = String.format(Locale.US, "%.6f", coords.longitude)
+      val exactAreaName = resolveExactAreaName(coords)
+
       val urlStr = "https://api.open-meteo.com/v1/forecast" +
         "?latitude=$lat&longitude=$lon" +
         "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,rain,weather_code,cloud_cover,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
         "&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m,uv_index" +
         "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,uv_index_max,sunrise,sunset" +
-        "&timezone=auto"
+        "&models=best_match&timezone=auto"
 
       val url = URL(urlStr)
       connection = (url.openConnection() as HttpURLConnection).apply {
@@ -163,7 +172,7 @@ class RealWeatherProvider(
         reader.close()
 
         val json = JSONObject(response)
-        val freshSnapshot = parseWeatherJson(json, coords)
+        val freshSnapshot = parseWeatherJson(json, exactAreaName)
         cachedWeather = freshSnapshot
         freshSnapshot
       } else {
@@ -190,7 +199,7 @@ class RealWeatherProvider(
     }
   }
 
-  private fun parseWeatherJson(json: JSONObject, coords: DeviceLocation): WeatherSnapshot {
+  private fun parseWeatherJson(json: JSONObject, resolvedAreaName: String): WeatherSnapshot {
     val current = json.getJSONObject("current")
     val temp = current.optDouble("temperature_2m", Double.NaN).toFloat()
     val feelsLike = current.optDouble("apparent_temperature", Double.NaN).let { if (it.isNaN()) null else it.toFloat() }
@@ -375,11 +384,198 @@ class RealWeatherProvider(
       windSpeedTomorrowMax = windSpeedTomorrow,
       hourlyForecast = hourlyList,
       dailyForecast = dailyList,
-      locationName = "موقعي الحالي",
+      locationName = resolvedAreaName,
       isAvailable = true,
       isCached = false,
       lastUpdatedMillis = System.currentTimeMillis()
     )
+  }
+
+  /**
+   * Resolves the exact geographical area (القرية / البلدية / المدينة + الولاية)
+   * using high-detail Arabic Reverse Geocoding (OpenStreetMap Nominatim + BigDataCloud + Android Geocoder).
+   */
+  private fun resolveExactAreaName(coords: DeviceLocation): String {
+    val coordKey = String.format(Locale.US, "%.3f,%.3f", coords.latitude, coords.longitude)
+    val existing = cachedAreaName
+    if (cachedCoordKey == coordKey && !existing.isNullOrBlank()) {
+      return existing
+    }
+
+    // 1. Try OpenStreetMap Nominatim Reverse Geocoding at zoom=18 (village / suburb / municipality / wilaya)
+    val nominatimName = fetchNominatimAreaName(coords.latitude, coords.longitude)
+    if (!nominatimName.isNullOrBlank()) {
+      cachedCoordKey = coordKey
+      cachedAreaName = nominatimName
+      return nominatimName
+    }
+
+    // 2. Try BigDataCloud Client Reverse Geocoding in Arabic
+    val bdcName = fetchBigDataCloudAreaName(coords.latitude, coords.longitude)
+    if (!bdcName.isNullOrBlank()) {
+      cachedCoordKey = coordKey
+      cachedAreaName = bdcName
+      return bdcName
+    }
+
+    // 3. Fallback to Android on-device Geocoder
+    val localGeocoder = coords.resolvedLocationName?.takeIf { it.isNotBlank() }
+    if (localGeocoder != null) {
+      cachedCoordKey = coordKey
+      cachedAreaName = localGeocoder
+      return localGeocoder
+    }
+
+    return cachedWeather?.locationName?.takeIf { it.isNotBlank() && it != "موقعي الحالي" } ?: "موقعي الحالي"
+  }
+
+  private fun fetchNominatimAreaName(lat: Double, lon: Double): String? {
+    var conn: HttpURLConnection? = null
+    return try {
+      val latStr = String.format(Locale.US, "%.6f", lat)
+      val lonStr = String.format(Locale.US, "%.6f", lon)
+      val url = URL(
+        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$latStr&lon=$lonStr&zoom=18&accept-language=ar&addressdetails=1"
+      )
+      conn = (url.openConnection() as HttpURLConnection).apply {
+        connectTimeout = 2800
+        readTimeout = 2800
+        requestMethod = "GET"
+        setRequestProperty("User-Agent", "WeykyAssistantLauncher/1.0 (Android)")
+        setRequestProperty("Accept-Language", "ar")
+      }
+      if (conn.responseCode == 200) {
+        val text = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+        val root = JSONObject(text)
+        val addr = root.optJSONObject("address") ?: return null
+
+        val finePlace = firstNonBlank(
+          addr.optString("village"),
+          addr.optString("hamlet"),
+          addr.optString("town"),
+          addr.optString("suburb"),
+          addr.optString("neighbourhood"),
+          addr.optString("quarter"),
+          addr.optString("municipality"),
+          addr.optString("city_district"),
+          addr.optString("city"),
+          addr.optString("county")
+        )
+        val statePlace = firstNonBlank(
+          addr.optString("state"),
+          addr.optString("province"),
+          addr.optString("region"),
+          addr.optString("city")
+        )
+
+        formatPlaceAndState(finePlace, statePlace)
+      } else null
+    } catch (_: Exception) {
+      null
+    } finally {
+      conn?.disconnect()
+    }
+  }
+
+  private fun fetchBigDataCloudAreaName(lat: Double, lon: Double): String? {
+    var conn: HttpURLConnection? = null
+    return try {
+      val latStr = String.format(Locale.US, "%.6f", lat)
+      val lonStr = String.format(Locale.US, "%.6f", lon)
+      val url = URL(
+        "https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=$latStr&longitude=$lonStr&localityLanguage=ar"
+      )
+      conn = (url.openConnection() as HttpURLConnection).apply {
+        connectTimeout = 2800
+        readTimeout = 2800
+        requestMethod = "GET"
+      }
+      if (conn.responseCode == 200) {
+        val text = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+        val root = JSONObject(text)
+        val finePlace = firstNonBlank(
+          root.optString("locality"),
+          root.optString("city")
+        )
+        val statePlace = firstNonBlank(
+          root.optString("principalSubdivision"),
+          root.optString("city")
+        )
+        formatPlaceAndState(finePlace, statePlace)
+      } else null
+    } catch (_: Exception) {
+      null
+    } finally {
+      conn?.disconnect()
+    }
+  }
+
+  /**
+   * Resolves approximate coordinates and exact Arabic geographical region name via client IP
+   * when hardware GPS is disabled or location permission has not been granted yet.
+   */
+  private fun fetchIpBasedLocation(): DeviceLocation? {
+    var conn: HttpURLConnection? = null
+    return try {
+      val url = URL("https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=ar")
+      conn = (url.openConnection() as HttpURLConnection).apply {
+        connectTimeout = 2800
+        readTimeout = 2800
+        requestMethod = "GET"
+      }
+      if (conn.responseCode == 200) {
+        val text = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+        val root = JSONObject(text)
+        val lat = root.optDouble("latitude", Double.NaN)
+        val lon = root.optDouble("longitude", Double.NaN)
+        if (!lat.isNaN() && !lon.isNaN()) {
+          val finePlace = firstNonBlank(
+            root.optString("locality"),
+            root.optString("city")
+          )
+          val statePlace = firstNonBlank(
+            root.optString("principalSubdivision"),
+            root.optString("city"),
+            root.optString("countryName")
+          )
+          val areaName = formatPlaceAndState(finePlace, statePlace)
+          if (!areaName.isNullOrBlank()) {
+            cachedAreaName = areaName
+          }
+          DeviceLocation(
+            latitude = lat,
+            longitude = lon,
+            resolvedLocationName = areaName
+          )
+        } else null
+      } else null
+    } catch (_: Exception) {
+      null
+    } finally {
+      conn?.disconnect()
+    }
+  }
+
+  private fun firstNonBlank(vararg values: String?): String? {
+    for (v in values) {
+      val clean = v?.trim()
+      if (!clean.isNullOrEmpty() && clean != "null") {
+        return clean
+      }
+    }
+    return null
+  }
+
+  private fun formatPlaceAndState(finePlace: String?, statePlace: String?): String? {
+    return when {
+      finePlace != null && statePlace != null &&
+        !finePlace.equals(statePlace, ignoreCase = true) &&
+        !statePlace.contains(finePlace) && !finePlace.contains(statePlace) ->
+        "$finePlace، $statePlace"
+      finePlace != null -> finePlace
+      statePlace != null -> statePlace
+      else -> null
+    }
   }
 
   private fun degreesToCompass(deg: Float): String {

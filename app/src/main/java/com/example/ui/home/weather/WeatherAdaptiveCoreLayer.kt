@@ -1,5 +1,7 @@
 package com.example.ui.home.weather
 
+import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -17,23 +19,31 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.example.core.state.WeykyUiState
 import com.example.device.battery.ChargingState
 import com.example.device.weather.WeatherSnapshot
 import com.example.rendering.visual_state.CoreVisualState
 import java.util.Calendar
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Weather condition types supported by the Adaptive Weather Core.
@@ -49,7 +59,6 @@ enum class AdaptiveWeatherType {
 
 /**
  * Resolves the real-time weather snapshot into one of the supported Adaptive Weather Core types.
- * Returns UNKNOWN if the weather data is missing, offline, or undetermined.
  */
 fun resolveAdaptiveWeatherType(weather: WeatherSnapshot?): AdaptiveWeatherType {
   if (weather == null) return AdaptiveWeatherType.UNKNOWN
@@ -139,21 +148,122 @@ fun isCoreEligibleForWeatherEffect(uiState: WeykyUiState, isCharging: Boolean): 
 }
 
 /**
+ * Astronomical lunar phases (الأطوار والأحجام القمرية المعروفة).
+ */
+enum class LunarPhaseType(val arabicName: String) {
+  NEW_MOON("المحاق"),
+  WAXING_CRESCENT("الهلال المتزايد"),
+  FIRST_QUARTER("التربيع الأول"),
+  WAXING_GIBBOUS("الأحدب المتزايد"),
+  FULL_MOON("البدر الكامل"),
+  WANING_GIBBOUS("الأحدب المتناقص"),
+  LAST_QUARTER("التربيع الأخير"),
+  WANING_CRESCENT("الهلال المتناقص")
+}
+
+/**
+ * Real-time astronomical lunar telemetry for the current date, time, and sunrise/sunset window.
+ */
+data class LunarAstronomy(
+  val cyclePhase: Float,            // 0.0 = New Moon, 0.25 = First Quarter, 0.50 = Full Moon, 0.75 = Last Quarter
+  val illuminationFraction: Float,  // 0.0 .. 1.0 illuminated fraction of the lunar disk
+  val phaseType: LunarPhaseType,
+  val moonriseMinutes: Int,         // Minutes from midnight (0..1439)
+  val moonsetMinutes: Int,          // Minutes from midnight (0..1439)
+  val isMoonInAppearanceWindow: Boolean, // True if current time is between moonrise & moonset and not New Moon
+  val isMoonVisibleAtNight: Boolean      // True if it is currently night AND the moon is in its appearance window
+)
+
+/**
+ * Calculates the real-time astronomical lunar phase, illumination size, and moonrise/moonset
+ * appearance window (موعد ظهور القمر).
+ */
+fun calculateLunarAstronomy(
+  weather: WeatherSnapshot?,
+  calendar: Calendar = Calendar.getInstance()
+): LunarAstronomy {
+  // Reference astronomical New Moon epoch: Jan 6, 2000 18:14 UTC (947182440000L ms)
+  val referenceNewMoonMs = 947182440000L
+  val synodicMonthDays = 29.530588853
+  val synodicMonthMs = (synodicMonthDays * 86400000.0)
+
+  val diffMs = calendar.timeInMillis - referenceNewMoonMs
+  val rawPhase = ((diffMs % synodicMonthMs) + synodicMonthMs) % synodicMonthMs
+  val cyclePhase = (rawPhase / synodicMonthMs).toFloat().coerceIn(0f, 0.9999f)
+
+  // Illumination fraction: 0.0 at New Moon, 0.5 at Quarter, 1.0 at Full Moon
+  val illuminationFraction = ((1.0 - cos(cyclePhase * 2.0 * Math.PI)) * 0.5).toFloat().coerceIn(0f, 1f)
+
+  val phaseType = when {
+    cyclePhase < 0.03f || cyclePhase > 0.97f -> LunarPhaseType.NEW_MOON
+    cyclePhase < 0.22f -> LunarPhaseType.WAXING_CRESCENT
+    cyclePhase < 0.28f -> LunarPhaseType.FIRST_QUARTER
+    cyclePhase < 0.47f -> LunarPhaseType.WAXING_GIBBOUS
+    cyclePhase <= 0.53f -> LunarPhaseType.FULL_MOON
+    cyclePhase <= 0.72f -> LunarPhaseType.WANING_GIBBOUS
+    cyclePhase <= 0.78f -> LunarPhaseType.LAST_QUARTER
+    else -> LunarPhaseType.WANING_CRESCENT
+  }
+
+  val sunriseMin = parseTimeToMinutes(weather?.sunriseToday) ?: (6 * 60)       // 06:00 default
+  val sunsetMin = parseTimeToMinutes(weather?.sunsetToday) ?: (18 * 60 + 30)  // 18:30 default
+
+  // Astronomically, Moonrise lags Sunrise by (cyclePhase * 24 hours):
+  // - At New Moon (0.0): rises at Sunrise, sets at Sunset
+  // - At First Quarter (0.25): rises at Noon, sets at Midnight
+  // - At Full Moon (0.50): rises at Sunset, sets at Sunrise (visible all night)
+  // - At Last Quarter (0.75): rises at Midnight, sets at Noon
+  val moonriseMinutes = ((sunriseMin + (cyclePhase * 1440f).toInt()) % 1440 + 1440) % 1440
+  // Average lunar transit duration above horizon is ~12 hours 25 minutes (745 mins)
+  val moonsetMinutes = (moonriseMinutes + 745) % 1440
+
+  val currentMin = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+  val isAboveHorizon = if (moonriseMinutes <= moonsetMinutes) {
+    currentMin in moonriseMinutes..moonsetMinutes
+  } else {
+    // Wraps across midnight (e.g., rises at 19:00, sets at 07:25)
+    currentMin >= moonriseMinutes || currentMin <= moonsetMinutes
+  }
+
+  val isMoonInAppearanceWindow = isAboveHorizon && phaseType != LunarPhaseType.NEW_MOON
+  val isNight = currentMin < sunriseMin || currentMin >= sunsetMin
+
+  return LunarAstronomy(
+    cyclePhase = cyclePhase,
+    illuminationFraction = illuminationFraction,
+    phaseType = phaseType,
+    moonriseMinutes = moonriseMinutes,
+    moonsetMinutes = moonsetMinutes,
+    isMoonInAppearanceWindow = isMoonInAppearanceWindow,
+    isMoonVisibleAtNight = isNight && isMoonInAppearanceWindow
+  )
+}
+
+/**
+ * Determines whether the current weather condition includes visible clouds around the core.
+ */
+fun hasCloudsInWeather(weather: WeatherSnapshot?): Boolean {
+  val weatherType = resolveAdaptiveWeatherType(weather)
+  val cloudCover = weather?.cloudCoverPercent ?: 0
+  return when (weatherType) {
+    AdaptiveWeatherType.PARTLY_CLOUDY,
+    AdaptiveWeatherType.CLOUDY,
+    AdaptiveWeatherType.RAIN,
+    AdaptiveWeatherType.THUNDERSTORM -> true
+    AdaptiveWeatherType.CLEAR -> cloudCover >= 20
+    AdaptiveWeatherType.UNKNOWN -> cloudCover >= 20
+  }
+}
+
+/**
  * Adaptive Weather Core Layer.
  *
- * Wraps the protected central WEYKY Core without altering its underlying logic,
- * shape, size, scale (0.44f), or animations.
- *
- * In IDLE mode ONLY:
- * - Renders a realistic Sun (daytime) or Moon (nighttime) directly over the core.
- * - In partly cloudy or cloudy weather, realistic volumetric clouds drift IN FRONT of the sun/moon.
- * - In rainy weather, rain clouds and precipitation streams pour down IN FRONT of the core.
- * - In clear weather, a brilliant realistic solar flare and blazing incandescent corona shine forth.
- *
- * Functional state transition guarantee:
- * When moving to ANY functional state (listening, speaking, music, call, charging, etc.),
- * all weather overlays immediately disappear (150ms cutoff) with zero canvas drawing overhead,
- * revealing the untouched original WEYKY Core.
+ * - Daytime: Surrounds the Golden Sun Core with warm golden solar atmospheric glow.
+ * - Nighttime: Surrounds the White Moon Core (when in its appearance window) with luminous
+ *   silver-white lunar glow scaled to its astronomical phase size (Crescent, Quarter, Gibbous, Full Moon).
+ * - Weather-Conditional Clouds: Renders domain-warped 6-octave fBm volumetric clouds ONLY when
+ *   actual weather has clouds (`PARTLY_CLOUDY`, `CLOUDY`, `RAIN`, `THUNDERSTORM`, or `cloudCoverPercent >= 20`),
+ *   backlit by golden sunlight during the day and silver-white moonlight at night.
  */
 @Composable
 fun WeatherAdaptiveCoreLayer(
@@ -167,9 +277,41 @@ fun WeatherAdaptiveCoreLayer(
     batterySnap?.chargingState == ChargingState.FULL
 
   val isEligible = isCoreEligibleForWeatherEffect(uiState, isDeviceCharging)
-  val weatherType = resolveAdaptiveWeatherType(uiState.weatherSnapshot)
-  val isNight = remember(uiState.weatherSnapshot) { isNightTime(uiState.weatherSnapshot) }
-  val shouldRender = isEligible && weatherType != AdaptiveWeatherType.UNKNOWN
+  val weather = uiState.weatherSnapshot
+  val weatherType = resolveAdaptiveWeatherType(weather)
+  val isNight = isNightTime(weather)
+  val lunarAstronomy = remember(weather?.sunriseToday, weather?.sunsetToday, uiState.currentTimeString) {
+    calculateLunarAstronomy(weather)
+  }
+  val showClouds = hasCloudsInWeather(weather)
+  val shouldRender = isEligible
+
+  // Cloud opacity scales naturally with weather cloudiness intensity
+  val cloudIntensity = when (weatherType) {
+    AdaptiveWeatherType.THUNDERSTORM, AdaptiveWeatherType.RAIN, AdaptiveWeatherType.CLOUDY -> 1.0f
+    AdaptiveWeatherType.PARTLY_CLOUDY -> 0.82f
+    else -> ((weather?.cloudCoverPercent ?: 0) / 100f).coerceIn(0f, 0.85f)
+  }
+
+  // Pre-compute photorealistic domain-warped fBm volumetric cloud textures (Day Golden vs Night Silver-White)
+  val backCloudBitmap = remember(isNight) {
+    VolumetricCloudGenerator.generateCloudLayerBitmap(
+      width = 320,
+      height = 220,
+      seed = 1337,
+      isFrontLayer = false,
+      isNight = isNight
+    )
+  }
+  val frontCloudBitmap = remember(isNight) {
+    VolumetricCloudGenerator.generateCloudLayerBitmap(
+      width = 340,
+      height = 230,
+      seed = 7919,
+      isFrontLayer = true,
+      isNight = isNight
+    )
+  }
 
   // Swift cutoff on functional state switch (150ms); smooth harmonic fade-in on return to IDLE (600ms)
   val weatherAlpha by animateFloatAsState(
@@ -181,40 +323,45 @@ fun WeatherAdaptiveCoreLayer(
     label = "AdaptiveWeatherAlpha"
   )
 
-  // Atmospheric infinite animations
-  val transition = rememberInfiniteTransition(label = "weather_core_motion")
-
-  // Slow continuous solar corona rotation
-  val solarRayAngleDeg by transition.animateFloat(
-    initialValue = 0f,
-    targetValue = 360f,
-    animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 36000, easing = LinearEasing),
-      repeatMode = RepeatMode.Restart
-    ),
-    label = "solar_ray_angle"
+  val cloudAlpha by animateFloatAsState(
+    targetValue = if (shouldRender && showClouds) cloudIntensity else 0f,
+    animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+    label = "AdaptiveCloudAlpha"
   )
 
-  // Gentle solar corona breathing pulse
+  val transition = rememberInfiniteTransition(label = "weather_core_motion")
+
+  // Gentle celestial halo breathing pulse
   val solarPulse by transition.animateFloat(
-    initialValue = 0.96f,
-    targetValue = 1.06f,
+    initialValue = 0.97f,
+    targetValue = 1.05f,
     animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 4000, easing = FastOutSlowInEasing),
+      animation = tween(durationMillis = 4200, easing = FastOutSlowInEasing),
       repeatMode = RepeatMode.Reverse
     ),
     label = "solar_pulse"
   )
 
-  // Cloud drift across the face of the sun/moon (22 seconds per pass)
-  val cloudDriftProgress by transition.animateFloat(
-    initialValue = -0.4f,
-    targetValue = 1.4f,
+  // Slow continuous drift for front cloud bank
+  val cloudDriftPrimary by transition.animateFloat(
+    initialValue = -0.06f,
+    targetValue = 0.06f,
     animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 22000, easing = LinearEasing),
-      repeatMode = RepeatMode.Restart
+      animation = tween(durationMillis = 28000, easing = FastOutSlowInEasing),
+      repeatMode = RepeatMode.Reverse
     ),
-    label = "cloud_drift_progress"
+    label = "cloud_drift_primary"
+  )
+
+  // Counter-drift for rear atmospheric cloud strata
+  val cloudDriftSecondary by transition.animateFloat(
+    initialValue = 0.05f,
+    targetValue = -0.05f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 36000, easing = FastOutSlowInEasing),
+      repeatMode = RepeatMode.Reverse
+    ),
+    label = "cloud_drift_secondary"
   )
 
   // Rain fall cycle
@@ -228,109 +375,80 @@ fun WeatherAdaptiveCoreLayer(
     label = "rain_progress"
   )
 
-  // Rare subtle sheet lightning flash
-  val lightningPhase by transition.animateFloat(
-    initialValue = 0f,
-    targetValue = 1f,
-    animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 8500, easing = LinearEasing),
-      repeatMode = RepeatMode.Restart
-    ),
-    label = "lightning_phase"
-  )
-
   Box(
     modifier = modifier
       .size(coreSizeDp)
       .testTag("weather_adaptive_core_layer"),
     contentAlignment = Alignment.Center
   ) {
-    // 1. Ambient Background Weather Canvas (Solar Corona & Radiant Aura behind core perimeter)
+    // 1. Ambient Background Celestial Glow (Golden Sun by Day / White Moon by Night) & Rear Clouds
     if (weatherAlpha > 0.005f) {
       Canvas(
         modifier = Modifier
-          .size(coreSizeDp * 1.40f)
+          .size(coreSizeDp * 1.65f)
           .testTag("weather_adaptive_core_bg_canvas")
       ) {
         val center = Offset(size.width / 2f, size.height / 2f)
-        val coreRadius = (size.minDimension / (2f * 1.40f))
+        val coreRadius = (size.minDimension / (2f * 1.65f)) * 0.86f
 
         if (!isNight) {
-          // Daytime solar corona rays and radiant golden halo
-          drawDaytimeSolarCorona(
+          // Daytime: Warm Golden Solar Atmosphere
+          drawGoldenSolarAtmosphere(
             center = center,
             coreRadius = coreRadius,
             pulse = solarPulse,
-            rayAngleDeg = solarRayAngleDeg,
-            weatherType = weatherType,
             alpha = weatherAlpha
           )
-        } else {
-          // Nighttime soft moonlight lunar halo
-          drawNightMoonlightHalo(
+        } else if (lunarAstronomy.isMoonInAppearanceWindow) {
+          // Nighttime (Moon in appearance window): Pure White-Silver Lunar Atmosphere scaled by illumination
+          drawWhiteLunarAtmosphere(
             center = center,
             coreRadius = coreRadius,
             pulse = solarPulse,
-            weatherType = weatherType,
+            illumination = lunarAstronomy.illuminationFraction,
             alpha = weatherAlpha
+          )
+        }
+
+        // Rear turbulent cloud strata behind the core (ONLY if weather has clouds)
+        if (cloudAlpha > 0.005f) {
+          val rearDriftPx = (size.width * cloudDriftSecondary).toInt()
+          drawImage(
+            image = backCloudBitmap,
+            dstOffset = IntOffset(rearDriftPx, (size.height * 0.14f).toInt()),
+            dstSize = IntSize(size.width.toInt(), (size.height * 0.78f).toInt()),
+            alpha = 0.82f * cloudAlpha * weatherAlpha
           )
         }
       }
     }
 
-    // 2. Protected WEYKY Core (untouched, original rendering)
+    // 2. The Living WEYKY Core Itself (Golden Sun by Day / White Moon in its Phase by Night)
     content()
 
-    // 3. FOREGROUND REALISTIC CELESTIAL & WEATHER OVERLAY (OVER THE CORE)
-    // Directly renders the realistic Sun/Moon surface, drifting clouds in front, and raindrops in front!
-    if (weatherAlpha > 0.005f) {
+    // 3. Foreground Volumetric fBm Clouds & Rain Precipitation (ONLY when present in weather)
+    if (weatherAlpha > 0.005f && (cloudAlpha > 0.005f || weatherType == AdaptiveWeatherType.RAIN || weatherType == AdaptiveWeatherType.THUNDERSTORM)) {
       Canvas(
         modifier = Modifier
-          .size(coreSizeDp * 1.40f)
+          .size(coreSizeDp * 1.65f)
           .testTag("weather_adaptive_core_fg_canvas")
       ) {
         val center = Offset(size.width / 2f, size.height / 2f)
-        val coreRadius = (size.minDimension / (2f * 1.40f))
+        val coreRadius = (size.minDimension / (2f * 1.65f)) * 0.86f
 
-        // A. Draw Celestial Body Surface ON TOP OF THE CORE
-        if (!isNight) {
-          // Realistic blazing sun photosphere & lens optics
-          drawRealisticSunOverlay(
-            center = center,
-            coreRadius = coreRadius,
-            pulse = solarPulse,
-            weatherType = weatherType,
-            alpha = weatherAlpha
-          )
-        } else {
-          // Realistic glowing moon disk with lunar maria / craters
-          drawRealisticMoonOverlay(
-            center = center,
-            coreRadius = coreRadius,
-            weatherType = weatherType,
-            alpha = weatherAlpha
+        if (cloudAlpha > 0.005f) {
+          val frontDriftPx = (size.width * cloudDriftPrimary).toInt()
+          drawImage(
+            image = frontCloudBitmap,
+            dstOffset = IntOffset(frontDriftPx, (size.height * 0.16f).toInt()),
+            dstSize = IntSize(size.width.toInt(), (size.height * 0.82f).toInt()),
+            alpha = 0.96f * cloudAlpha * weatherAlpha
           )
         }
 
-        // B. Draw Clouds IN FRONT OF the Sun / Moon
-        if (weatherType == AdaptiveWeatherType.PARTLY_CLOUDY ||
-            weatherType == AdaptiveWeatherType.CLOUDY ||
-            weatherType == AdaptiveWeatherType.RAIN ||
-            weatherType == AdaptiveWeatherType.THUNDERSTORM) {
-          drawFrontCloudsDrifting(
-            center = center,
-            coreRadius = coreRadius,
-            driftProgress = cloudDriftProgress,
-            weatherType = weatherType,
-            isNight = isNight,
-            lightningPhase = lightningPhase,
-            alpha = weatherAlpha
-          )
-        }
-
-        // C. Draw Rain & Precipitation IN FRONT OF the Core
+        // Rain Precipitation Particles if Rainy / Stormy
         if (weatherType == AdaptiveWeatherType.RAIN || weatherType == AdaptiveWeatherType.THUNDERSTORM) {
-          val precipMm = uiState.weatherSnapshot?.precipitationMm ?: 3.0f
+          val precipMm = weather?.precipitationMm ?: 3.0f
           drawFrontRainPrecipitation(
             center = center,
             coreRadius = coreRadius,
@@ -345,267 +463,82 @@ fun WeatherAdaptiveCoreLayer(
 }
 
 /**
- * Draws the realistic daytime incandescent Sun overlay directly over the core.
- * Features a glowing white-hot solar photosphere, golden chromosphere, and optical flare.
+ * Draws the warm golden solar atmospheric glow behind the living core during the day.
  */
-private fun DrawScope.drawRealisticSunOverlay(
+private fun DrawScope.drawGoldenSolarAtmosphere(
   center: Offset,
   coreRadius: Float,
   pulse: Float,
-  weatherType: AdaptiveWeatherType,
   alpha: Float
 ) {
-  val sunDiskRadius = coreRadius * 0.98f
-  val intensity = if (weatherType == AdaptiveWeatherType.CLEAR) 0.88f else 0.72f
+  val outerHaloRadius = coreRadius * 1.75f * pulse
 
-  // 1. Blazing solar photosphere radial gradient
   drawCircle(
     brush = Brush.radialGradient(
-      0.0f to Color(0xFFFFFFFF).copy(alpha = 0.92f * intensity * alpha), // Blinding white-hot core
-      0.25f to Color(0xFFFFF9C4).copy(alpha = 0.86f * intensity * alpha), // Pure solar yellow
-      0.55f to Color(0xFFFFD54F).copy(alpha = 0.80f * intensity * alpha), // Rich solar amber
-      0.82f to Color(0xFFFF9800).copy(alpha = 0.72f * intensity * alpha), // Chromosphere orange
-      0.97f to Color(0xFFFF5722).copy(alpha = 0.65f * intensity * alpha), // Solar limb red-orange
-      1.0f to Color(0x00FF5722),
-      center = center,
-      radius = sunDiskRadius
-    ),
-    radius = sunDiskRadius,
-    center = center
-  )
-
-  // 2. Solar limb darkening rim
-  drawCircle(
-    brush = Brush.radialGradient(
-      0.0f to Color.Transparent,
-      0.82f to Color.Transparent,
-      0.96f to Color(0xFFFF3D00).copy(alpha = 0.50f * intensity * alpha),
+      0.0f to Color(0xFFFFF9C4).copy(alpha = 0.65f * alpha),
+      0.42f to Color(0xFFFDE047).copy(alpha = 0.48f * alpha),
+      0.68f to Color(0xFFF59E0B).copy(alpha = 0.28f * alpha),
+      0.88f to Color(0xFFB45309).copy(alpha = 0.12f * alpha),
       1.0f to Color.Transparent,
       center = center,
-      radius = sunDiskRadius
+      radius = outerHaloRadius
     ),
-    radius = sunDiskRadius,
+    radius = outerHaloRadius,
     center = center
-  )
-
-  // 3. Central optical solar flare glint
-  val flareLen = sunDiskRadius * 0.75f * pulse
-  drawLine(
-    brush = Brush.radialGradient(
-      colors = listOf(Color(0xFFFFFFFF).copy(alpha = 0.85f * alpha), Color.Transparent),
-      center = center,
-      radius = flareLen
-    ),
-    start = Offset(center.x - flareLen, center.y),
-    end = Offset(center.x + flareLen, center.y),
-    strokeWidth = 2.5.dp.toPx(),
-    cap = StrokeCap.Round
-  )
-  drawLine(
-    brush = Brush.radialGradient(
-      colors = listOf(Color(0xFFFFFFFF).copy(alpha = 0.85f * alpha), Color.Transparent),
-      center = center,
-      radius = flareLen * 0.65f
-    ),
-    start = Offset(center.x, center.y - flareLen * 0.65f),
-    end = Offset(center.x, center.y + flareLen * 0.65f),
-    strokeWidth = 2.dp.toPx(),
-    cap = StrokeCap.Round
   )
 }
 
 /**
- * Draws the realistic Moon overlay directly over the core at night.
- * Features a pearlescent silver lunar surface with authentic darker lunar maria (craters and plains).
+ * Draws the luminous electric cyan-blue & ice-white lunar atmospheric corona and surrounding
+ * cosmic starfield behind the Moon core at night, matching the reference Moon artwork.
  */
-private fun DrawScope.drawRealisticMoonOverlay(
+private fun DrawScope.drawWhiteLunarAtmosphere(
   center: Offset,
   coreRadius: Float,
-  weatherType: AdaptiveWeatherType,
+  pulse: Float,
+  illumination: Float,
   alpha: Float
 ) {
-  val moonDiskRadius = coreRadius * 0.98f
-  val intensity = if (weatherType == AdaptiveWeatherType.CLEAR) 0.85f else 0.70f
+  val intensity = (0.55f + 0.45f * illumination).coerceIn(0.45f, 1f) * alpha
+  val outerHaloRadius = coreRadius * (1.62f + 0.20f * illumination) * pulse
 
-  // 1. Pearlescent silver-white lunar disk base
+  // Deep electric azure & cyan radial corona
   drawCircle(
     brush = Brush.radialGradient(
-      0.0f to Color(0xFFF1F5F9).copy(alpha = 0.90f * intensity * alpha),
-      0.65f to Color(0xFFE2E8F0).copy(alpha = 0.85f * intensity * alpha),
-      0.88f to Color(0xFFCBD5E1).copy(alpha = 0.78f * intensity * alpha),
-      0.98f to Color(0xFF94A3B8).copy(alpha = 0.68f * intensity * alpha),
+      0.0f to Color(0xFFFFFFFF).copy(alpha = 0.78f * intensity),
+      0.52f to Color(0xFF00F0FF).copy(alpha = 0.62f * intensity),
+      0.68f to Color(0xFF00B4D8).copy(alpha = 0.38f * intensity),
+      0.84f to Color(0xFF0284C7).copy(alpha = 0.18f * intensity),
       1.0f to Color.Transparent,
       center = center,
-      radius = moonDiskRadius
+      radius = outerHaloRadius
     ),
-    radius = moonDiskRadius,
+    radius = outerHaloRadius,
     center = center
   )
 
-  // 2. Realistic Lunar Maria (dark basalt plains like Sea of Tranquility and Ocean of Storms)
-  // Maria 1: Upper-left large plain
-  drawCircle(
-    brush = Brush.radialGradient(
-      colors = listOf(Color(0xFF475569).copy(alpha = 0.52f * alpha), Color.Transparent),
-      center = Offset(center.x - moonDiskRadius * 0.32f, center.y - moonDiskRadius * 0.28f),
-      radius = moonDiskRadius * 0.36f
-    ),
-    radius = moonDiskRadius * 0.36f,
-    center = Offset(center.x - moonDiskRadius * 0.32f, center.y - moonDiskRadius * 0.28f)
+  // Subtle surrounding starfield dust matching the reference image
+  val starAngles = floatArrayOf(
+    0.25f, 0.68f, 1.15f, 1.72f, 2.18f, 2.64f, 3.05f, 3.48f,
+    3.92f, 4.35f, 4.82f, 5.28f, 5.74f, 6.10f
   )
-
-  // Maria 2: Central-right plain
-  drawCircle(
-    brush = Brush.radialGradient(
-      colors = listOf(Color(0xFF334155).copy(alpha = 0.45f * alpha), Color.Transparent),
-      center = Offset(center.x + moonDiskRadius * 0.28f, center.y - moonDiskRadius * 0.08f),
-      radius = moonDiskRadius * 0.30f
-    ),
-    radius = moonDiskRadius * 0.30f,
-    center = Offset(center.x + moonDiskRadius * 0.28f, center.y - moonDiskRadius * 0.08f)
-  )
-
-  // Maria 3: Lower-left southern plain
-  drawCircle(
-    brush = Brush.radialGradient(
-      colors = listOf(Color(0xFF475569).copy(alpha = 0.48f * alpha), Color.Transparent),
-      center = Offset(center.x - moonDiskRadius * 0.18f, center.y + moonDiskRadius * 0.38f),
-      radius = moonDiskRadius * 0.28f
-    ),
-    radius = moonDiskRadius * 0.28f,
-    center = Offset(center.x - moonDiskRadius * 0.18f, center.y + moonDiskRadius * 0.38f)
-  )
-
-  // 3. Moon silver limb rim
-  drawCircle(
-    brush = Brush.radialGradient(
-      0.0f to Color.Transparent,
-      0.88f to Color.Transparent,
-      0.97f to Color(0xFFBAE6FD).copy(alpha = 0.45f * alpha),
-      1.0f to Color.Transparent,
-      center = center,
-      radius = moonDiskRadius
-    ),
-    radius = moonDiskRadius,
-    center = center
-  )
-}
-
-/**
- * Draws realistic volumetric clouds passing directly IN FRONT OF the Sun or Moon.
- */
-private fun DrawScope.drawFrontCloudsDrifting(
-  center: Offset,
-  coreRadius: Float,
-  driftProgress: Float,
-  weatherType: AdaptiveWeatherType,
-  isNight: Boolean,
-  lightningPhase: Float,
-  alpha: Float
-) {
-  val span = coreRadius * 2.8f
-  val baseCloudX = center.x - span * 0.5f + driftProgress * span
-
-  val isStorm = weatherType == AdaptiveWeatherType.THUNDERSTORM
-  val isRain = weatherType == AdaptiveWeatherType.RAIN
-  val isOvercast = weatherType == AdaptiveWeatherType.CLOUDY
-
-  // Sheet lightning illumination
-  val isLightningFlashing = isStorm && (lightningPhase in 0.94f..0.97f)
-  val flashBoost = if (isLightningFlashing) 0.65f else 0.0f
-
-  // Colors for clouds
-  val topHighlightColor = when {
-    isLightningFlashing -> Color(0xFFA5B4FC).copy(alpha = 0.85f * alpha)
-    isNight -> Color(0xFF94A3B8).copy(alpha = 0.62f * alpha)
-    isStorm || isRain -> Color(0xFF64748B).copy(alpha = 0.70f * alpha)
-    else -> Color(0xFFFFFFFF).copy(alpha = 0.84f * alpha) // Pure white fluffy cumulus highlight
-  }
-
-  val bodyColor = when {
-    isLightningFlashing -> Color(0xFF4338CA).copy(alpha = 0.80f * alpha)
-    isNight -> Color(0xFF1E293B).copy(alpha = 0.76f * alpha)
-    isStorm -> Color(0xFF0F172A).copy(alpha = 0.85f * alpha)
-    isRain -> Color(0xFF334155).copy(alpha = 0.80f * alpha)
-    isOvercast -> Color(0xFFB0BEC5).copy(alpha = 0.74f * alpha)
-    else -> Color(0xFFECEFF1).copy(alpha = 0.72f * alpha) // Soft daytime cloud belly
-  }
-
-  val silverLiningColor = if (!isNight && !isStorm) {
-    Color(0xFFFFD54F).copy(alpha = 0.65f * alpha) // Golden sunlight edge backlighting
-  } else {
-    Color(0xFFE2E8F0).copy(alpha = 0.45f * alpha) // Silver moonlight edge
-  }
-
-  // Cloud Cluster 1: Drifting across the upper-center face of the sun/moon
-  val cluster1Y = center.y - coreRadius * 0.20f
-  val puff1Radius = coreRadius * (if (isOvercast || isRain || isStorm) 0.56f else 0.44f)
-
-  // Cloud puffs in cluster 1
-  val puffs1 = listOf(
-    Offset(baseCloudX - puff1Radius * 0.7f, cluster1Y + puff1Radius * 0.1f) to (puff1Radius * 0.8f),
-    Offset(baseCloudX, cluster1Y - puff1Radius * 0.15f) to (puff1Radius * 1.05f),
-    Offset(baseCloudX + puff1Radius * 0.8f, cluster1Y + puff1Radius * 0.12f) to (puff1Radius * 0.85f),
-    Offset(baseCloudX + puff1Radius * 1.5f, cluster1Y + puff1Radius * 0.25f) to (puff1Radius * 0.65f)
-  )
-
-  for ((pos, r) in puffs1) {
-    // Silver / golden lining rim
+  for (i in starAngles.indices) {
+    val angle = starAngles[i]
+    val dist = coreRadius * (1.18f + (i % 4) * 0.14f)
+    val sx = center.x + cos(angle) * dist
+    val sy = center.y + sin(angle) * dist
+    val starAlpha = ((0.35f + (i % 3) * 0.22f) * intensity).coerceIn(0f, 0.9f)
+    val starColor = if (i % 2 == 0) Color.White else Color(0xFF7DD3FC)
     drawCircle(
-      brush = Brush.radialGradient(
-        colors = listOf(silverLiningColor, Color.Transparent),
-        center = Offset(pos.x, pos.y - r * 0.25f),
-        radius = r * 1.15f
-      ),
-      radius = r * 1.15f,
-      center = Offset(pos.x, pos.y - r * 0.25f)
+      color = starColor.copy(alpha = starAlpha),
+      radius = if (i % 3 == 0) 1.9f else 1.2f,
+      center = Offset(sx, sy)
     )
-
-    // Main cloud puff volume
-    drawCircle(
-      brush = Brush.radialGradient(
-        0.0f to topHighlightColor,
-        0.55f to bodyColor,
-        0.95f to bodyColor.copy(alpha = bodyColor.alpha * 0.8f),
-        1.0f to Color.Transparent,
-        center = Offset(pos.x - r * 0.15f, pos.y - r * 0.2f),
-        radius = r
-      ),
-      radius = r,
-      center = pos
-    )
-  }
-
-  // Cloud Cluster 2: Secondary lower drifting cloud band (if cloudy or stormy or staggered)
-  if (isOvercast || isRain || isStorm || weatherType == AdaptiveWeatherType.PARTLY_CLOUDY) {
-    val cluster2X = baseCloudX - coreRadius * 0.85f
-    val cluster2Y = center.y + coreRadius * 0.32f
-    val puff2Radius = coreRadius * 0.42f
-
-    val puffs2 = listOf(
-      Offset(cluster2X - puff2Radius * 0.5f, cluster2Y) to (puff2Radius * 0.75f),
-      Offset(cluster2X + puff2Radius * 0.3f, cluster2Y - puff2Radius * 0.1f) to (puff2Radius * 0.95f),
-      Offset(cluster2X + puff2Radius * 1.1f, cluster2Y + puff2Radius * 0.1f) to (puff2Radius * 0.80f)
-    )
-
-    for ((pos, r) in puffs2) {
-      drawCircle(
-        brush = Brush.radialGradient(
-          0.0f to topHighlightColor,
-          0.60f to bodyColor,
-          1.0f to Color.Transparent,
-          center = Offset(pos.x, pos.y - r * 0.2f),
-          radius = r
-        ),
-        radius = r,
-        center = pos
-      )
-    }
   }
 }
 
 /**
- * Draws realistic rain streams falling downward across and in front of the core.
+ * Draws realistic rain precipitation streaks when rainy weather is active.
  */
 private fun DrawScope.drawFrontRainPrecipitation(
   center: Offset,
@@ -614,13 +547,13 @@ private fun DrawScope.drawFrontRainPrecipitation(
   precipitationMm: Float,
   alpha: Float
 ) {
-  val dropCount = if (precipitationMm > 6f) 32 else if (precipitationMm > 2f) 22 else 14
-  val dropLength = 22.dp.toPx()
-  val widthSpan = coreRadius * 2.4f
-  val heightSpan = coreRadius * 2.8f
+  val dropCount = if (precipitationMm > 6f) 30 else 18
+  val dropLength = 20.dp.toPx()
+  val widthSpan = coreRadius * 2.2f
+  val heightSpan = coreRadius * 2.6f
 
   for (i in 0 until dropCount) {
-    val xFraction = ((i * 0.1618f) % 1.0f) // golden ratio distribution across width
+    val xFraction = ((i * 0.1618f) % 1.0f)
     val dropX = center.x - widthSpan * 0.5f + xFraction * widthSpan
 
     val yStagger = ((i * 0.37f) % 1.0f)
@@ -628,107 +561,268 @@ private fun DrawScope.drawFrontRainPrecipitation(
     val startY = center.y - heightSpan * 0.5f + effectiveProgress * heightSpan
     val endY = startY + dropLength
 
-    // Smooth boundary fade
     val normY = (startY - (center.y - heightSpan * 0.5f)) / heightSpan
     val edgeFade = sin(normY * Math.PI).toFloat().coerceIn(0f, 1f)
 
-    val dropColor = Color(0xFF00F0FF).copy(alpha = 0.60f * edgeFade * alpha)
+    val dropColor = Color(0xFF00F0FF).copy(alpha = 0.55f * edgeFade * alpha)
 
     drawLine(
       color = dropColor,
       start = Offset(dropX, startY),
-      end = Offset(dropX - dropLength * 0.15f, endY), // gentle natural wind slant
-      strokeWidth = 2.dp.toPx(),
+      end = Offset(dropX - dropLength * 0.12f, endY),
+      strokeWidth = 1.8.dp.toPx(),
       cap = StrokeCap.Round
     )
   }
 }
 
 /**
- * Draws daytime solar corona and ambient solar rays radiating behind the core perimeter.
+ * True Procedural Volumetric Cloud Shader using 6-Octave Rotated Fractional Brownian Motion (fBm),
+ * Domain Warping (Turbulence Curl), and Directional Ray-Marched Celestial Scattering.
+ *
+ * - Daytime (`isNight = false`): Molten golden-amber solar backlighting and illuminated crevices.
+ * - Nighttime (`isNight = true`): Luminous silver-pearl lunar backlighting and moonlit crevices.
+ * Completely free of geometric circles or bubble shapes.
  */
-private fun DrawScope.drawDaytimeSolarCorona(
-  center: Offset,
-  coreRadius: Float,
-  pulse: Float,
-  rayAngleDeg: Float,
-  weatherType: AdaptiveWeatherType,
-  alpha: Float
-) {
-  val haloRadius = coreRadius * 1.35f * pulse
-  val intensity = if (weatherType == AdaptiveWeatherType.CLEAR) 1.0f else 0.65f
+internal object VolumetricCloudGenerator {
 
-  // 1. Soft glowing outer corona
-  drawCircle(
-    brush = Brush.radialGradient(
-      0.0f to Color.Transparent,
-      0.68f to Color.Transparent,
-      0.85f to Color(0xFFFFD54F).copy(alpha = 0.36f * intensity * alpha),
-      0.96f to Color(0xFFFF9800).copy(alpha = 0.22f * intensity * alpha),
-      1.0f to Color.Transparent,
-      center = center,
-      radius = haloRadius
-    ),
-    radius = haloRadius,
-    center = center
-  )
+  private fun hash(ix: Int, iy: Int, seed: Int): Float {
+    var n = ix * 374761393 + iy * 668265263 + seed * 1442695041
+    n = (n xor (n ushr 13)) * 1274126177
+    n = n xor (n ushr 16)
+    return (n and 0x7fffffff).toFloat() / 2147483647.0f
+  }
 
-  // 2. Radiant solar rays (12 rays extending outward)
-  val rayCount = 12
-  val innerR = coreRadius * 0.95f
-  val outerR = coreRadius * 1.35f * pulse
+  private fun noise2D(x: Float, y: Float, seed: Int): Float {
+    val ix = floor(x).toInt()
+    val iy = floor(y).toInt()
+    val fx = x - ix
+    val fy = y - iy
 
-  for (i in 0 until rayCount) {
-    val angle = Math.toRadians((i * (360.0 / rayCount) + rayAngleDeg).toDouble())
-    val startX = center.x + (cos(angle) * innerR).toFloat()
-    val startY = center.y + (sin(angle) * innerR).toFloat()
-    val endX = center.x + (cos(angle) * outerR).toFloat()
-    val endY = center.y + (sin(angle) * outerR).toFloat()
+    // Quintic smoothstep interpolation for C2 continuity (zero grid lines)
+    val ux = fx * fx * fx * (fx * (fx * 6f - 15f) + 10f)
+    val uy = fy * fy * fy * (fy * (fy * 6f - 15f) + 10f)
 
-    val rayColor = if (i % 2 == 0) {
-      Color(0xFFFFEE58).copy(alpha = 0.30f * intensity * alpha)
+    val a = hash(ix, iy, seed)
+    val b = hash(ix + 1, iy, seed)
+    val c = hash(ix, iy + 1, seed)
+    val d = hash(ix + 1, iy + 1, seed)
+
+    val k0 = a + (b - a) * ux
+    val k1 = c + (d - c) * ux
+    return k0 + (k1 - k0) * uy
+  }
+
+  /**
+   * 6-octave rotated fBm to create natural anisotropic cloud wisps and fractal edges.
+   */
+  private fun fbm(px: Float, py: Float, seed: Int, octaves: Int = 6): Float {
+    var value = 0f
+    var amp = 0.52f
+    var x = px
+    var y = py
+    var norm = 0f
+
+    for (i in 0 until octaves) {
+      val n = noise2D(x, y, seed + i * 101)
+      // Mix standard and ridged turbulence for realistic cauliflower cloud tops & wispy tendrils
+      val billow = 1f - abs(2f * n - 1f)
+      val mixed = n * 0.65f + billow * 0.35f
+      value += amp * mixed
+      norm += amp
+
+      // Rotate by ~37 degrees and scale frequency by 2.07x per octave
+      val nx = (0.80f * x - 0.60f * y) * 2.07f + 13.7f
+      val ny = (0.60f * x + 0.80f * y) * 2.07f + 29.3f
+      x = nx
+      y = ny
+      amp *= 0.50f
+    }
+    return value / norm
+  }
+
+  private fun smoothstep(edge0: Float, edge1: Float, x: Float): Float {
+    val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+  }
+
+  /**
+   * Evaluates volumetric cloud density at normalized coordinates (u, v) in [0, 1].
+   */
+  private fun sampleCloudDensity(u: Float, v: Float, seed: Int, isFrontLayer: Boolean): Float {
+    // Aspect-scaled coordinates
+    val x = (u - 0.5f) * 3.8f
+    val y = (v - 0.5f) * 2.6f
+
+    // 1. Domain Warping (Turbulence Curl)
+    val qx = fbm(x * 1.3f, y * 1.7f, seed, 4) - 0.5f
+    val qy = fbm(x * 1.3f + 5.2f, y * 1.7f + 1.3f, seed + 17, 4) - 0.5f
+
+    val rx = fbm(x * 2.1f + 2.4f * qx + 1.7f, y * 2.5f + 2.4f * qy + 9.2f, seed + 31, 5) - 0.5f
+    val ry = fbm(x * 2.1f + 2.4f * qx + 8.3f, y * 2.5f + 2.4f * qy + 2.8f, seed + 47, 5) - 0.5f
+
+    val f = fbm(x * 2.2f + 1.9f * rx, y * 3.0f + 1.9f * ry, seed + 73, 6)
+    val fineWisp = fbm(x * 5.8f + 1.2f * rx, y * 7.2f + 1.2f * ry, seed + 113, 4)
+
+    // 2. Sweeping Cloud Bank Silhouette
+    val ridgeLineY = if (isFrontLayer) {
+      0.38f + 0.14f * (u - 0.35f) - 0.10f * exp(-12f * (u - 0.30f) * (u - 0.30f))
     } else {
-      Color(0xFFFF9800).copy(alpha = 0.22f * intensity * alpha)
+      0.34f + 0.08f * sin(u * 4.5f)
     }
 
-    drawLine(
-      brush = Brush.linearGradient(
-        colors = listOf(rayColor, Color.Transparent),
-        start = Offset(startX, startY),
-        end = Offset(endX, endY)
-      ),
-      start = Offset(startX, startY),
-      end = Offset(endX, endY),
-      strokeWidth = 2.4.dp.toPx(),
-      cap = StrokeCap.Round
-    )
+    // Distance below the jagged fractal ridge
+    val warpedRidgeY = ridgeLineY + qy * 0.18f + ry * 0.11f - (f - 0.5f) * 0.34f
+    val verticalEnvelope = smoothstep(warpedRidgeY - 0.12f, warpedRidgeY + 0.14f, v)
+
+    // Horizontal stratocumulus banding with crevices where light peeks through
+    val strataWave = sin(v * 22f + qy * 5.5f + u * 2.5f)
+    val creviceCarve = smoothstep(-0.85f, 0.35f, strataWave) * 0.32f + 0.68f
+
+    // Soft organic horizontal & bottom fade (warped by noise so it never forms a box or circle)
+    val edgeNoise = (f - 0.5f) * 0.18f
+    val leftFade = smoothstep(0.01f, 0.22f, u + edgeNoise)
+    val rightFade = smoothstep(0.01f, 0.22f, (1f - u) + edgeNoise)
+    val bottomFade = smoothstep(0.01f, 0.24f, (1f - v) + edgeNoise * 0.8f)
+    val topFade = smoothstep(0.02f, 0.18f, v + edgeNoise * 0.5f)
+
+    val rawDensity = (f * 0.72f + fineWisp * 0.28f) * verticalEnvelope * creviceCarve
+    val masked = smoothstep(0.30f, 0.68f, rawDensity) * leftFade * rightFade * bottomFade * topFade
+    return masked.coerceIn(0f, 1f)
   }
-}
 
-/**
- * Draws nighttime celestial moonlight halo radiating behind the core perimeter.
- */
-private fun DrawScope.drawNightMoonlightHalo(
-  center: Offset,
-  coreRadius: Float,
-  pulse: Float,
-  weatherType: AdaptiveWeatherType,
-  alpha: Float
-) {
-  val haloRadius = coreRadius * 1.32f * pulse
-  val intensity = if (weatherType == AdaptiveWeatherType.CLEAR) 0.85f else 0.55f
+  /**
+   * Generates an ARGB_8888 ImageBitmap of volumetric clouds illuminated by the Golden Sun (day)
+   * or White Moon (night).
+   */
+  fun generateCloudLayerBitmap(
+    width: Int,
+    height: Int,
+    seed: Int,
+    isFrontLayer: Boolean,
+    isNight: Boolean = false
+  ): ImageBitmap {
+    val densities = FloatArray(width * height)
+    for (py in 0 until height) {
+      val v = py.toFloat() / height.toFloat()
+      val rowOffset = py * width
+      for (px in 0 until width) {
+        val u = px.toFloat() / width.toFloat()
+        densities[rowOffset + px] = sampleCloudDensity(u, v, seed, isFrontLayer)
+      }
+    }
 
-  drawCircle(
-    brush = Brush.radialGradient(
-      0.0f to Color.Transparent,
-      0.72f to Color.Transparent,
-      0.88f to Color(0xFFBAE6FD).copy(alpha = 0.28f * intensity * alpha),
-      0.97f to Color(0xFF60A5FA).copy(alpha = 0.18f * intensity * alpha),
-      1.0f to Color.Transparent,
-      center = center,
-      radius = haloRadius
-    ),
-    radius = haloRadius,
-    center = center
-  )
+    // Core center in normalized cloud texture space
+    val sunU = 0.50f
+    val sunV = 0.36f
+
+    val pixels = IntArray(width * height)
+
+    for (py in 0 until height) {
+      val v = py.toFloat() / height.toFloat()
+      val rowOffset = py * width
+      for (px in 0 until width) {
+        val d = densities[rowOffset + px]
+        if (d <= 0.008f) {
+          pixels[rowOffset + px] = 0
+          continue
+        }
+
+        val u = px.toFloat() / width.toFloat()
+        val dx = sunU - u
+        val dy = sunV - v
+        val distToSun = sqrt(dx * dx + dy * dy).coerceAtLeast(0.001f)
+        val dirX = dx / distToSun
+        val dirY = dy / distToSun
+
+        // Ray-march 4 steps toward the Core to compute optical depth (shadowing)
+        var opticalDepth = 0f
+        val stepSize = 0.032f
+        for (s in 1..4) {
+          val su = (u + dirX * stepSize * s).coerceIn(0f, 0.999f)
+          val sv = (v + dirY * stepSize * s).coerceIn(0f, 0.999f)
+          val sx = (su * width).toInt().coerceIn(0, width - 1)
+          val sy = (sv * height).toInt().coerceIn(0, height - 1)
+          opticalDepth += densities[sy * width + sx]
+        }
+
+        // Beer-Lambert light transmittance + powder sugar forward-scattering effect
+        val transmittance = exp(-1.15f * opticalDepth)
+        val sunProximity = exp(-4.2f * max(0f, distToSun - 0.10f).pow(2))
+
+        // 1. Ragged Rim Lighting along the cloud edges facing the celestial core
+        val edgeThinness = (1f - d * 0.65f).coerceIn(0f, 1f)
+        val rimIntensity = (transmittance * sunProximity * edgeThinness * 1.45f).coerceIn(0f, 1f)
+
+        // 2. Crevice Glow where light filters between lower horizontal cloud bands
+        val horizontalGlowZone = exp(-3.5f * (u - 0.52f) * (u - 0.52f))
+        val creviceIntensity = (transmittance.pow(0.65f) * (1f - d).pow(1.2f) * horizontalGlowZone * 1.15f).coerceIn(0f, 1f)
+
+        val totalLight = max(rimIntensity, creviceIntensity * 0.78f).coerceIn(0f, 1f)
+
+        val r: Float
+        val g: Float
+        val b: Float
+
+        if (isNight) {
+          // Nighttime: Deep Midnight Sapphire -> Electric Cyan-Blue Crevice -> Ice-White Lunar Rim
+          if (totalLight < 0.30f) {
+            val t = totalLight / 0.30f
+            r = 8f + (18f - 8f) * t
+            g = 14f + (36f - 14f) * t
+            b = 28f + (68f - 28f) * t
+          } else if (totalLight < 0.62f) {
+            val t = (totalLight - 0.30f) / 0.32f
+            r = 18f + (14f - 18f) * t
+            g = 36f + (165f - 36f) * t
+            b = 68f + (233f - 68f) * t
+          } else if (totalLight < 0.85f) {
+            val t = (totalLight - 0.62f) / 0.23f
+            r = 14f + (186f - 14f) * t
+            g = 165f + (230f - 165f) * t
+            b = 233f + (253f - 233f) * t
+          } else {
+            val t = (totalLight - 0.85f) / 0.15f
+            r = 186f + (255f - 186f) * t
+            g = 230f + (255f - 230f) * t
+            b = 253f + (255f - 253f) * t
+          }
+        } else {
+          // Daytime: Deep Charcoal Shadow -> Warm Amber Crevice -> Blazing Golden Solar Rim
+          if (totalLight < 0.30f) {
+            val t = totalLight / 0.30f
+            r = 9f + (32f - 9f) * t
+            g = 13f + (38f - 13f) * t
+            b = 22f + (52f - 22f) * t
+          } else if (totalLight < 0.62f) {
+            val t = (totalLight - 0.30f) / 0.32f
+            r = 32f + (217f - 32f) * t
+            g = 38f + (119f - 38f) * t
+            b = 52f + (6f - 52f) * t
+          } else if (totalLight < 0.85f) {
+            val t = (totalLight - 0.62f) / 0.23f
+            r = 217f + (253f - 217f) * t
+            g = 119f + (224f - 119f) * t
+            b = 6f + (71f - 6f) * t
+          } else {
+            val t = (totalLight - 0.85f) / 0.15f
+            r = 253f + (255f - 253f) * t
+            g = 224f + (253f - 224f) * t
+            b = 71f + (231f - 71f) * t
+          }
+        }
+
+        val alpha = (smoothstep(0.01f, 0.28f, d) * (if (isFrontLayer) 0.96f else 0.82f)).coerceIn(0f, 1f)
+        val aInt = (alpha * 255f).toInt().coerceIn(0, 255)
+        val rInt = r.toInt().coerceIn(0, 255)
+        val gInt = g.toInt().coerceIn(0, 255)
+        val bInt = b.toInt().coerceIn(0, 255)
+
+        pixels[rowOffset + px] = AndroidColor.argb(aInt, rInt, gInt, bInt)
+      }
+    }
+
+    val bitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+    return bitmap.asImageBitmap()
+  }
 }

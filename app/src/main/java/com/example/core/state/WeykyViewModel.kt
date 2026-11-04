@@ -121,6 +121,8 @@ data class WeykyUiState(
   val minimalGradientEndHex: Long = 0xFF2C5364L,
   val minimalDimmingAlpha: Float = 0.45f,
   val favoriteWallpaperIds: Set<String> = emptySet(),
+  val modernBgPresetId: String = "cyber_aurora",
+  val disabledNotificationPackages: Set<String> = emptySet(),
   val inputQuery: String = "",
   val lastResponseText: String? = null,
   val proactiveSuggestions: List<com.example.core.intelligence.conversation.ActionableOption> = emptyList(),
@@ -237,10 +239,13 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
     batteryProvider = batteryProvider
   )
 
+  val knowledgeRepository = com.example.core.intelligence.knowledge.repository.KnowledgeRepository.getInstance(context)
+
   val localConversationalEngine = com.example.core.intelligence.conversation.LocalConversationalEngine(
     situationSnapshotBuilder = situationSnapshotBuilder,
     deviceInfoProvider = deviceInfoProvider,
-    contextReasoningEngine = contextReasoningEngine
+    contextReasoningEngine = contextReasoningEngine,
+    knowledgeRepository = knowledgeRepository
   )
 
   private val intentExecutor = IntentExecutor(
@@ -257,7 +262,8 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
     settingsActionHandler = settingsActionHandler,
     contextActionHandler = contextActionHandler,
     localConversationalEngine = localConversationalEngine,
-    deviceInfoProvider = deviceInfoProvider
+    deviceInfoProvider = deviceInfoProvider,
+    knowledgeRepository = knowledgeRepository
   )
 
   // Voice Recognition Pipeline
@@ -317,6 +323,9 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
         prefs.getLong("bg_color_hex", 0xFF000000L)
       }
 
+      val savedDisabledNotifPkgs = prefs.getStringSet("disabled_notif_packages", emptySet()) ?: emptySet()
+      NotificationRepository.setDisabledAppPackages(savedDisabledNotifPkgs)
+
       WeykyUiState(
         themeMode = savedThemeMode,
         dayNightMode = savedDayNight,
@@ -328,6 +337,8 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
         minimalGradientEndHex = prefs.getLong("minimal_grad_end", 0xFF2C5364L),
         minimalDimmingAlpha = prefs.getFloat("minimal_dim_alpha", 0.45f),
         favoriteWallpaperIds = prefs.getStringSet("favorite_wallpapers", emptySet()) ?: emptySet(),
+        modernBgPresetId = prefs.getString("modern_bg_preset_id", "cyber_aurora") ?: "cyber_aurora",
+        disabledNotificationPackages = savedDisabledNotifPkgs,
         coreScale = prefs.getFloat("core_scale", 0.44f),
         isLightMode = isLight,
         backgroundColorHex = bgHex,
@@ -369,6 +380,7 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
     refreshLauncherStatus()
     voicePipeline.prewarmInstalledOfflineModelAsync()
     viewModelScope.launch {
+      knowledgeRepository.initializeSeedAndWarmUpIndex()
       appResolver.warmUpIndex()
       refreshInstalledApps()
     }
@@ -404,7 +416,54 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
 
   fun refreshInstalledApps() {
     val apps = appResolver.getInstalledLaunchableApps()
+    NotificationRepository.customAppLabels = apps.associate { it.packageName to it.label }
+    NotificationRepository.explicitlyEnabledAppPackages =
+      apps.map { it.packageName }.toSet() - _uiState.value.disabledNotificationPackages
     _uiState.update { it.copy(installedApps = apps) }
+  }
+
+  fun toggleNotificationAppAllowed(packageName: String) {
+    if (packageName.isBlank()) return
+    val currentDisabled = _uiState.value.disabledNotificationPackages.toMutableSet()
+    if (currentDisabled.contains(packageName)) {
+      currentDisabled.remove(packageName)
+    } else {
+      currentDisabled.add(packageName)
+    }
+    prefs.edit().putStringSet("disabled_notif_packages", currentDisabled).apply()
+    NotificationRepository.setDisabledAppPackages(currentDisabled)
+    NotificationRepository.explicitlyEnabledAppPackages =
+      _uiState.value.installedApps.map { it.packageName }.toSet() - currentDisabled
+    val hasAccess = capabilityDetector.isCapabilitySupported(DeviceCapability.NOTIFICATION_LISTENER)
+    val summary = NotificationRepository.getSummary(hasAccess)
+    _uiState.update {
+      it.copy(
+        disabledNotificationPackages = currentDisabled,
+        notificationSummary = summary
+      )
+    }
+    recalculateSceneAndEvents()
+  }
+
+  fun setAllNotificationAppsAllowed(allowAll: Boolean) {
+    val updatedDisabled = if (allowAll) {
+      emptySet()
+    } else {
+      _uiState.value.installedApps.map { it.packageName }.toSet()
+    }
+    prefs.edit().putStringSet("disabled_notif_packages", updatedDisabled).apply()
+    NotificationRepository.setDisabledAppPackages(updatedDisabled)
+    NotificationRepository.explicitlyEnabledAppPackages =
+      _uiState.value.installedApps.map { it.packageName }.toSet() - updatedDisabled
+    val hasAccess = capabilityDetector.isCapabilitySupported(DeviceCapability.NOTIFICATION_LISTENER)
+    val summary = NotificationRepository.getSummary(hasAccess)
+    _uiState.update {
+      it.copy(
+        disabledNotificationPackages = updatedDisabled,
+        notificationSummary = summary
+      )
+    }
+    recalculateSceneAndEvents()
   }
 
   fun toggleAppDrawer(open: Boolean? = null) {
@@ -507,7 +566,8 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
 
   fun announceTime() {
     val time = _uiState.value.currentTimeString.ifBlank { "غير محدد" }
-    val text = "الوقت الآن هو $time."
+    val date = _uiState.value.currentDateString.ifBlank { "اليوم" }
+    val text = "الوقت الآن هو $time، والتاريخ $date."
     announceInfo(text)
   }
 
@@ -531,10 +591,12 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   fun announceLocation() {
-    val loc = _uiState.value.weatherSnapshot?.locationName?.takeIf { it.isNotBlank() }
+    val loc = _uiState.value.weatherSnapshot?.locationName
+      ?.takeIf { it.isNotBlank() && it != "موقعي الحالي" }
     val text = if (loc != null) {
       "موقعك الجغرافي الحالي هو: $loc."
     } else {
+      fetchInitialWeather()
       "جاري تحديد وتحديث موقعك الجغرافي."
     }
     announceInfo(text)
@@ -1494,6 +1556,11 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
+  fun setModernBackgroundPreset(presetId: String) {
+    prefs.edit().putString("modern_bg_preset_id", presetId).apply()
+    _uiState.update { it.copy(modernBgPresetId = presetId) }
+  }
+
   fun restoreFullThemeDefaults() {
     prefs.edit()
       .putString("theme_mode", com.example.ui.theme.WeykyThemeMode.TACTICAL.id)
@@ -1504,6 +1571,7 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
       .putFloat("core_scale", 0.44f)
       .putString("minimal_bg_type", com.example.ui.theme.MinimalBackgroundType.DEFAULT.id)
       .putFloat("minimal_dim_alpha", 0.45f)
+      .putString("modern_bg_preset_id", "cyber_aurora")
       .apply()
     _uiState.update {
       it.copy(
@@ -1514,7 +1582,8 @@ class WeykyViewModel(application: Application) : AndroidViewModel(application) {
         cardBorderColorHex = 0xFF00F0FFL,
         coreScale = 0.44f,
         minimalBgType = com.example.ui.theme.MinimalBackgroundType.DEFAULT,
-        minimalDimmingAlpha = 0.45f
+        minimalDimmingAlpha = 0.45f,
+        modernBgPresetId = "cyber_aurora"
       )
     }
   }

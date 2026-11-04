@@ -58,7 +58,7 @@ fun ModernCombinedDateWeatherCard(
     "18°"
   }
   val condition = weather?.condition?.ifBlank { null } ?: "غائم جزئياً"
-  val locationName = weather?.locationName?.takeIf { it.isNotBlank() } ?: "الجزائر"
+  val locationName = weather?.locationName?.takeIf { it.isNotBlank() } ?: "جاري تحديد المنطقة..."
 
   val primaryDate = uiState.currentDateString.ifBlank { "الخميس، 22 أكتوبر" }
   val englishDate = uiState.currentEnglishDateString.ifBlank { "THURSDAY, 22 OCT" }

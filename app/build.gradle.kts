@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Base64
 
 plugins {
   alias(libs.plugins.android.application)
@@ -20,6 +21,9 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    ksp {
+      arg("room.schemaLocation", "$projectDir/schemas")
+    }
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
@@ -63,7 +67,22 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  sourceSets {
+    getByName("main") {
+      assets.srcDirs("src/main/assets", "../public/assets")
+    }
+  }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        it.systemProperty(
+          "robolectric.dependency.repo.url",
+          "https://maven-central.storage-download.googleapis.com/maven2"
+        )
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
@@ -144,3 +163,21 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
+val ensureDebugKeystore = tasks.register("ensureDebugKeystore") {
+  val keystoreFile = rootProject.layout.projectDirectory.file("debug.keystore").asFile
+  val base64File = rootProject.layout.projectDirectory.file("debug.keystore.base64").asFile
+  outputs.file(keystoreFile)
+  onlyIf { !keystoreFile.exists() && base64File.exists() }
+  doLast {
+    if (!keystoreFile.exists() && base64File.exists()) {
+      val base64Content = base64File.readText().replace("\\s".toRegex(), "")
+      keystoreFile.writeBytes(Base64.getDecoder().decode(base64Content))
+    }
+  }
+}
+
+tasks.matching { it.name.startsWith("validateSigning") }.configureEach {
+  dependsOn(ensureDebugKeystore)
+}
+

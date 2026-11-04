@@ -202,39 +202,75 @@ fun RealtimeSkyViewport(
           // A. Twinkling Stars
           drawStars(w, h, starTwinkle)
 
-          // B. Luminous Moon with Crescent & Halo
-          val moonCenterX = w * 0.72f
-          val moonCenterY = h * 0.32f
-          val moonRadius = w * 0.16f
+          // B. Luminous Blue-White Moon with Electric Cyan Corona (matching reference artwork)
+          val lunar = calculateLunarAstronomy(weather)
+          if (lunar.isMoonInAppearanceWindow) {
+            val moonCenterX = w * 0.70f
+            val moonCenterY = h * 0.35f
+            val moonRadius = w * (0.16f + 0.05f * lunar.illuminationFraction)
+            val moonCenter = Offset(moonCenterX, moonCenterY)
 
-          // Outer lunar halo
-          drawCircle(
-            brush = Brush.radialGradient(
-              colors = listOf(
-                Color(0x35E0F2FE).copy(alpha = celestialGlow * 0.4f),
-                Color.Transparent
+            // Outer electric cyan-blue lunar corona
+            drawCircle(
+              brush = Brush.radialGradient(
+                colors = listOf(
+                  Color(0x9900F0FF).copy(alpha = celestialGlow * 0.70f),
+                  Color(0x5500B4D8).copy(alpha = celestialGlow * 0.45f),
+                  Color(0x220284C7).copy(alpha = celestialGlow * 0.25f),
+                  Color.Transparent
+                ),
+                center = moonCenter,
+                radius = moonRadius * 2.6f
               ),
-              center = Offset(moonCenterX, moonCenterY),
-              radius = moonRadius * 2.4f
-            ),
-            center = Offset(moonCenterX, moonCenterY),
-            radius = moonRadius * 2.4f
-          )
+              center = moonCenter,
+              radius = moonRadius * 2.6f
+            )
 
-          // Moon body (crescent path)
-          val moonColor = Color(0xFFF1F5F9)
-          drawCircle(
-            color = moonColor,
-            center = Offset(moonCenterX, moonCenterY),
-            radius = moonRadius
-          )
-          // Subtract circle to create crescent
-          val shadowCenter = Offset(moonCenterX - moonRadius * 0.45f, moonCenterY - moonRadius * 0.35f)
-          drawCircle(
-            color = getNightSkyColor(conditionType),
-            center = shadowCenter,
-            radius = moonRadius * 0.92f
-          )
+            // Base ice-white & sapphire-blue moon sphere
+            drawCircle(
+              brush = Brush.radialGradient(
+                0.0f to Color(0xFFE0F2FE),
+                0.55f to Color(0xFFBAE6FD),
+                0.85f to Color(0xFF60A5FA),
+                1.0f to Color(0xFFFFFFFF),
+                center = moonCenter,
+                radius = moonRadius
+              ),
+              center = moonCenter,
+              radius = moonRadius
+            )
+
+            // Subtle sapphire lunar maria patches & bright Tycho highland
+            drawCircle(
+              color = Color(0x771E3A8A),
+              center = moonCenter + Offset(-moonRadius * 0.26f, -moonRadius * 0.14f),
+              radius = moonRadius * 0.38f
+            )
+            drawCircle(
+              color = Color(0x661E40AF),
+              center = moonCenter + Offset(moonRadius * 0.08f, -moonRadius * 0.08f),
+              radius = moonRadius * 0.30f
+            )
+            drawCircle(
+              color = Color(0xCCFFFFFF),
+              center = moonCenter + Offset(moonRadius * 0.32f, moonRadius * 0.34f),
+              radius = moonRadius * 0.22f
+            )
+
+            // Blazing white-cyan outer rim ring
+            drawCircle(
+              color = Color(0xAA00E5FF),
+              center = moonCenter,
+              radius = moonRadius * 1.04f,
+              style = Stroke(width = 2.2f)
+            )
+            drawCircle(
+              color = Color.White,
+              center = moonCenter,
+              radius = moonRadius,
+              style = Stroke(width = 1.2f)
+            )
+          }
         }
 
         SkyTimeOfDay.DAY -> {
@@ -341,6 +377,8 @@ fun RealtimeSkyViewport(
           else -> 0.82f
         }
 
+        val nightRimColor = if (timeOfDay == SkyTimeOfDay.NIGHT) Color(0xFFFEF08A).copy(alpha = 0.85f) else null
+
         // Cloud Layer 1 (Lower, drifting faster)
         val c1X = w * cloudOffset1 - w * 0.2f
         drawVolumetricCloud(
@@ -348,7 +386,8 @@ fun RealtimeSkyViewport(
           y = h * 0.54f,
           scaleW = w * 0.75f,
           scaleH = h * 0.38f,
-          color = cloudTint.copy(alpha = cloudAlpha)
+          color = cloudTint.copy(alpha = cloudAlpha),
+          rimColor = nightRimColor
         )
 
         // Cloud Layer 2 (Higher, offset parallax)
@@ -358,7 +397,8 @@ fun RealtimeSkyViewport(
           y = h * 0.36f,
           scaleW = w * 0.65f,
           scaleH = h * 0.32f,
-          color = cloudTint.copy(alpha = cloudAlpha * 0.85f)
+          color = cloudTint.copy(alpha = cloudAlpha * 0.85f),
+          rimColor = nightRimColor
         )
       }
 
@@ -484,31 +524,54 @@ private fun DrawScope.drawVolumetricCloud(
   y: Float,
   scaleW: Float,
   scaleH: Float,
-  color: Color
+  color: Color,
+  rimColor: Color? = null
 ) {
-  // Main base body
-  drawOval(
-    color = color,
-    topLeft = Offset(x, y),
-    size = Size(scaleW, scaleH)
-  )
-  // Left top puff
-  drawCircle(
-    color = color,
-    center = Offset(x + scaleW * 0.32f, y + scaleH * 0.25f),
-    radius = scaleH * 0.65f
-  )
-  // Center top puff (highest)
-  drawCircle(
-    color = color,
-    center = Offset(x + scaleW * 0.55f, y + scaleH * 0.15f),
-    radius = scaleH * 0.75f
-  )
-  // Right puff
-  drawCircle(
-    color = color,
-    center = Offset(x + scaleW * 0.78f, y + scaleH * 0.35f),
-    radius = scaleH * 0.55f
+  val cloudPath = Path().apply {
+    moveTo(x, y + scaleH * 0.85f)
+    cubicTo(
+      x + scaleW * 0.08f, y + scaleH * 0.35f,
+      x + scaleW * 0.18f, y + scaleH * 0.18f,
+      x + scaleW * 0.30f, y + scaleH * 0.26f
+    )
+    cubicTo(
+      x + scaleW * 0.40f, y - scaleH * 0.15f,
+      x + scaleW * 0.58f, y - scaleH * 0.18f,
+      x + scaleW * 0.68f, y + scaleH * 0.22f
+    )
+    cubicTo(
+      x + scaleW * 0.78f, y + scaleH * 0.05f,
+      x + scaleW * 0.92f, y + scaleH * 0.32f,
+      x + scaleW, y + scaleH * 0.82f
+    )
+    cubicTo(
+      x + scaleW * 0.75f, y + scaleH * 0.96f,
+      x + scaleW * 0.25f, y + scaleH * 0.96f,
+      x, y + scaleH * 0.85f
+    )
+    close()
+  }
+
+  if (rimColor != null) {
+    drawPath(
+      path = cloudPath,
+      color = rimColor,
+      style = Stroke(width = 2.2f, cap = StrokeCap.Round)
+    )
+  }
+
+  drawPath(
+    path = cloudPath,
+    brush = Brush.verticalGradient(
+      colors = listOf(
+        color,
+        color.copy(alpha = color.alpha * 0.88f),
+        Color.Transparent
+      ),
+      startY = y - scaleH * 0.18f,
+      endY = y + scaleH
+    ),
+    style = Fill
   )
 }
 

@@ -76,13 +76,151 @@ import com.example.ui.home.HomeResponseCard
 import com.example.ui.theme.JarvisHudColors
 import com.example.ui.theme.WeykyThemeMode
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
+
+/**
+ * Responsive metrics tailored for Tablet Landscape / Desktop mode.
+ * Dynamically scales taskbar, HUD pills, music/notification cards, Start Menu, and Core
+ * proportionally to the tablet's window dimensions.
+ */
+@Immutable
+data class DesktopTabletMetrics(
+  val scale: Float,
+  val horizontalPadding: Dp,
+  val topHudPadding: Dp,
+  val taskbarHeight: Dp,
+  val taskbarControlHeight: Dp,
+  val taskbarHorizontalMargin: Dp,
+  val taskbarBottomMargin: Dp,
+  val reservedBottomPadding: Dp,
+  val startEmblemBoxSize: Dp,
+  val startEmblemIconSize: Dp,
+  val startTitleSp: TextUnit,
+  val searchMinWidth: Dp,
+  val searchMaxWidth: Dp,
+  val searchFontSp: TextUnit,
+  val pinnedAppBoxSize: Dp,
+  val pinnedAppIconSize: Dp,
+  val systemTrayFontSp: TextUnit,
+  val systemTrayIconSize: Dp,
+  val topPillHeight: Dp,
+  val topLocationMaxWidth: Dp,
+  val topPillIconSize: Dp,
+  val topPillPrimarySp: TextUnit,
+  val topPillTempSp: TextUnit,
+  val mediaCardMinWidth: Dp,
+  val mediaCardMaxWidth: Dp,
+  val mediaCardHeight: Dp,
+  val mediaArtBoxSize: Dp,
+  val mediaTitleSp: TextUnit,
+  val mediaSubtitleSp: TextUnit,
+  val mediaPlayButtonSize: Dp,
+  val mediaTransportButtonSize: Dp,
+  val maxCoreSize: Dp,
+  val responseMaxWidth: Dp,
+  val responseMaxHeight: Dp,
+  val startMenuMinWidth: Dp,
+  val startMenuMaxWidth: Dp,
+  val startMenuMinHeight: Dp,
+  val startMenuMaxHeight: Dp
+)
+
+@Composable
+fun rememberDesktopTabletMetrics(
+  deviceProfile: DeviceProfile
+): DesktopTabletMetrics {
+  val windowWidthDp = deviceProfile.windowWidthDp
+  val windowHeightDp = deviceProfile.windowHeightDp
+  val deviceCategory = deviceProfile.deviceCategory
+  val isTablet = deviceProfile.isTablet
+
+  return remember(windowWidthDp, windowHeightDp, deviceCategory, isTablet) {
+    // Smart scaling decision based on detected DeviceCategory (Tablet vs Phone) + exact screen dimensions
+    val scale = when (deviceCategory) {
+      com.example.ui.adaptive.DeviceCategory.TABLET_LARGE -> {
+        val widthRatio = (windowWidthDp.value / 880f).coerceIn(1.22f, 1.44f)
+        val heightRatio = (windowHeightDp.value / 560f).coerceIn(1.20f, 1.42f)
+        ((widthRatio * 0.55f) + (heightRatio * 0.45f)).coerceIn(1.22f, 1.42f)
+      }
+      com.example.ui.adaptive.DeviceCategory.TABLET_COMPACT -> {
+        val widthRatio = (windowWidthDp.value / 800f).coerceIn(1.14f, 1.30f)
+        val heightRatio = (windowHeightDp.value / 520f).coerceIn(1.12f, 1.28f)
+        ((widthRatio * 0.55f) + (heightRatio * 0.45f)).coerceIn(1.15f, 1.28f)
+      }
+      com.example.ui.adaptive.DeviceCategory.PHONE -> {
+        val widthRatio = (windowWidthDp.value / 780f).coerceIn(0.96f, 1.12f)
+        val heightRatio = (windowHeightDp.value / 400f).coerceIn(0.95f, 1.10f)
+        ((widthRatio * 0.50f) + (heightRatio * 0.50f)).coerceIn(0.98f, 1.10f)
+      }
+    }
+
+    val taskbarHeight = if (isTablet) {
+      (50f * scale).dp.coerceIn(58.dp, 68.dp)
+    } else {
+      (48f * scale).dp.coerceIn(48.dp, 54.dp)
+    }
+    val taskbarControlHeight = if (isTablet) {
+      (36f * scale).dp.coerceIn(42.dp, 50.dp)
+    } else {
+      (34f * scale).dp.coerceIn(34.dp, 38.dp)
+    }
+    val taskbarHorizontalMargin = (12f * scale).dp.coerceIn(10.dp, 24.dp)
+    val taskbarBottomMargin = (5f * scale).dp.coerceIn(4.dp, 12.dp)
+    val reservedBottomPadding = taskbarHeight + taskbarBottomMargin + 6.dp
+    val maxMenuHeight = (windowHeightDp - reservedBottomPadding - 14.dp).coerceIn(260.dp, 640.dp)
+
+    DesktopTabletMetrics(
+      scale = scale,
+      horizontalPadding = (14f * scale).dp.coerceIn(14.dp, 28.dp),
+      topHudPadding = (8f * scale).dp.coerceIn(8.dp, 18.dp),
+      taskbarHeight = taskbarHeight,
+      taskbarControlHeight = taskbarControlHeight,
+      taskbarHorizontalMargin = taskbarHorizontalMargin,
+      taskbarBottomMargin = taskbarBottomMargin,
+      reservedBottomPadding = reservedBottomPadding,
+      startEmblemBoxSize = (24f * scale).dp.coerceIn(24.dp, 36.dp),
+      startEmblemIconSize = (20f * scale).dp.coerceIn(20.dp, 30.dp),
+      startTitleSp = (12f * scale).sp,
+      searchMinWidth = (windowWidthDp * 0.21f).coerceIn(if (isTablet) 210.dp else 150.dp, 290.dp),
+      searchMaxWidth = (windowWidthDp * 0.29f).coerceIn(if (isTablet) 270.dp else 215.dp, 390.dp),
+      searchFontSp = (12f * scale).sp,
+      pinnedAppBoxSize = (34f * scale).dp.coerceIn(34.dp, 48.dp),
+      pinnedAppIconSize = (26f * scale).dp.coerceIn(26.dp, 36.dp),
+      systemTrayFontSp = (11.2f * scale).sp,
+      systemTrayIconSize = (15f * scale).dp.coerceIn(15.dp, 22.dp),
+      topPillHeight = (36f * scale).dp.coerceIn(if (isTablet) 44.dp else 36.dp, 52.dp),
+      topLocationMaxWidth = (windowWidthDp * 0.27f).coerceIn(if (isTablet) 240.dp else 190.dp, 350.dp),
+      topPillIconSize = (15f * scale).dp.coerceIn(15.dp, 22.dp),
+      topPillPrimarySp = (11.2f * scale).sp,
+      topPillTempSp = (13.2f * scale).sp,
+      mediaCardMinWidth = (windowWidthDp * 0.31f).coerceIn(if (isTablet) 295.dp else 250.dp, 360.dp),
+      mediaCardMaxWidth = (windowWidthDp * 0.37f).coerceIn(if (isTablet) 335.dp else 295.dp, 420.dp),
+      mediaCardHeight = (56f * scale).dp.coerceIn(if (isTablet) 66.dp else 56.dp, 76.dp),
+      mediaArtBoxSize = (38f * scale).dp.coerceIn(if (isTablet) 46.dp else 38.dp, 54.dp),
+      mediaTitleSp = (11.2f * scale).sp,
+      mediaSubtitleSp = (9.2f * scale).sp,
+      mediaPlayButtonSize = (32f * scale).dp.coerceIn(32.dp, 44.dp),
+      mediaTransportButtonSize = (28f * scale).dp.coerceIn(28.dp, 40.dp),
+      maxCoreSize = (windowHeightDp * 0.74f).coerceIn(if (isTablet) 260.dp else 180.dp, 460.dp),
+      responseMaxWidth = (windowWidthDp * 0.62f).coerceIn(480.dp, 840.dp),
+      responseMaxHeight = (windowHeightDp * 0.24f).coerceIn(84.dp, 180.dp),
+      startMenuMinWidth = (windowWidthDp * 0.40f).coerceIn(360.dp, 500.dp),
+      startMenuMaxWidth = (windowWidthDp * 0.48f).coerceIn(420.dp, 600.dp),
+      startMenuMinHeight = minOf(if (isTablet) 380.dp else 280.dp, maxMenuHeight),
+      startMenuMaxHeight = maxMenuHeight
+    )
+  }
+}
+
 /**
  * Redesigned Arabic RTL Landscape Desktop Experience for WEYKY Launcher.
- * Specifically adapted for Samsung Galaxy A24 and mobile widescreen ergonomics:
- * - Upper-Right: Compact interactive information pills (Location, Weather, Date) -> speaks info on click.
- * - Upper-Left: Compact interactive music player widget with transport controls and app launch on artwork tap.
- * - Center Stage: Completely protected, spacious living WEYKY Core.
- * - Bottom: Slim, professional desktop taskbar with Arabic search box, network status, clock, and battery.
+ * Tailored for Tablets and widescreen ergonomics:
+ * - Upper-Right: Proportional interactive information pills (Location, Weather) -> speaks info on click.
+ * - Upper-Left: Proportional interactive music player widget & compact notification card.
+ * - Center Stage: Completely protected, spacious living WEYKY Core scaled for tablets.
+ * - Bottom: Tablet-scaled desktop taskbar with Arabic search box, pinned apps dock, network status, clock, and battery.
  */
 @Composable
 fun DesktopLandscapeHomeScreen(
@@ -122,6 +260,7 @@ fun DesktopLandscapeHomeScreen(
   keyboardController: SoftwareKeyboardController?,
   modifier: Modifier = Modifier
 ) {
+  val metrics = rememberDesktopTabletMetrics(deviceProfile = deviceProfile)
   val dynamicCoreSize = deviceProfile.calculateAdaptiveCoreSize(uiState.coreScale)
   val hasResponse = !uiState.lastResponseText.isNullOrBlank()
 
@@ -136,6 +275,8 @@ fun DesktopLandscapeHomeScreen(
   val hasFallbackEvent = uiState.importantEvents.isNotEmpty()
   val hasAlert = isLowBattery || isBatteryFull || hasMissedCall || hasUrgentNotif || hasFallbackEvent
 
+  val isMusicActivelyPlaying = uiState.isMusicPlaying || (uiState.activeMediaMetadata?.isPlaying == true)
+
   // Arabic RTL Desktop Workspace Layout
   CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
     Box(
@@ -143,72 +284,20 @@ fun DesktopLandscapeHomeScreen(
         .fillMaxSize()
         .testTag("desktop_landscape_root")
     ) {
-      // 1. DESKTOP WORKSPACE (Upper widgets + Spacious Central Core + Response Bubble)
+      // 1A. CENTER WORKSPACE (Spacious Central Core + Response Bubble above Taskbar)
       Column(
         modifier = Modifier
           .fillMaxSize()
           .padding(
-            start = 14.dp,
-            end = 14.dp,
-            top = 6.dp,
-            bottom = 54.dp // Reserves clean height for the 48dp floating taskbar
+            start = metrics.horizontalPadding,
+            end = metrics.horizontalPadding,
+            top = metrics.topHudPadding + metrics.topPillHeight + 4.dp,
+            bottom = metrics.reservedBottomPadding
           ),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally
       ) {
-        // TOP ROW: In RTL: Info Widgets on Right (Start), Music Player on Left (End)
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 2.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.Top
-        ) {
-          // Upper-Right (Start in RTL): Compact Information Pills (Location, Weather, Date)
-          DesktopCompactInfoPills(
-            uiState = uiState,
-            themeMode = uiState.themeMode,
-            borderColor = borderColor,
-            panelBg = panelBgElevated,
-            textPrimary = textPrimary,
-            textSecondary = textSecondary,
-            onLocationClick = onLocationClick,
-            onWeatherClick = onWeatherClick,
-            onDateClick = onDateClick
-          )
-
-          // Upper-Left (End in RTL): Compact Music Player Widget
-          DesktopCompactMusicWidget(
-            uiState = uiState,
-            themeMode = uiState.themeMode,
-            borderColor = borderColor,
-            panelBg = panelBgElevated,
-            textPrimary = textPrimary,
-            textSecondary = textSecondary,
-            onToggleMediaPlayback = onToggleMediaPlayback,
-            onPreviousMediaTrack = onPreviousMediaTrack,
-            onNextMediaTrack = onNextMediaTrack,
-            onLaunchMusicApp = onLaunchMusicApp
-          )
-        }
-
-        // Contextual Alert (if present, rendered as a compact floating card)
-        if (hasAlert) {
-          Box(
-            modifier = Modifier
-              .widthIn(max = 520.dp)
-              .padding(vertical = 2.dp),
-            contentAlignment = Alignment.Center
-          ) {
-            HomeContextAlertCard(
-              uiState = uiState,
-              borderColor = borderColor,
-              onQuerySubmit = onQuerySubmit
-            )
-          }
-        }
-
-        // Center Stage: The protected, untouched WEYKY Living Core
+        // Center Stage: The protected, untouched WEYKY Living Core scaled for tablets
         BoxWithConstraints(
           modifier = Modifier
             .weight(1f, fill = true)
@@ -217,7 +306,7 @@ fun DesktopLandscapeHomeScreen(
         ) {
           val maxAvailableDim = minOf(maxHeight, maxWidth)
           val calculatedCoreSize = minOf(dynamicCoreSize, maxAvailableDim * 0.95f)
-            .coerceIn(minOf(80.dp, maxAvailableDim * 0.75f), 350.dp)
+            .coerceIn(minOf(110.dp, maxAvailableDim * 0.80f), metrics.maxCoreSize)
 
           HomeCoreSection(
             uiState = uiState,
@@ -231,9 +320,9 @@ fun DesktopLandscapeHomeScreen(
           Box(
             modifier = Modifier
               .fillMaxWidth()
-              .widthIn(max = 660.dp)
-              .heightIn(max = 84.dp)
-              .padding(bottom = 2.dp)
+              .widthIn(max = metrics.responseMaxWidth)
+              .heightIn(max = metrics.responseMaxHeight)
+              .padding(bottom = 4.dp)
               .verticalScroll(rememberScrollState())
           ) {
             HomeResponseCard(
@@ -250,9 +339,82 @@ fun DesktopLandscapeHomeScreen(
         }
       }
 
-      // 2. BOTTOM DESKTOP TASKBAR (Floating slim bar across the bottom)
+      // 1B. TOP HUD ROW: In RTL: Info Widgets on Right (Start), Music Player & Compact Alerts on Left (End)
+      Row(
+        modifier = Modifier
+          .align(Alignment.TopCenter)
+          .fillMaxWidth()
+          .padding(
+            start = metrics.horizontalPadding,
+            end = metrics.horizontalPadding,
+            top = metrics.topHudPadding
+          ),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+      ) {
+        // Upper-Right (Start in RTL): Proportional Information Pills (Location, Weather)
+        DesktopCompactInfoPills(
+          uiState = uiState,
+          metrics = metrics,
+          themeMode = uiState.themeMode,
+          borderColor = borderColor,
+          panelBg = panelBgElevated,
+          textPrimary = textPrimary,
+          textSecondary = textSecondary,
+          onLocationClick = onLocationClick,
+          onWeatherClick = onWeatherClick,
+          onDateClick = onDateClick
+        )
+
+        // Upper-Left (End in RTL):
+        // - Music player appears ONLY when music is playing.
+        // - Notifications card is compact (same size as music player):
+        //   appears in the music player's spot when music is not playing, or directly below it when music is playing.
+        Column(
+          horizontalAlignment = Alignment.End,
+          verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          AnimatedVisibility(
+            visible = isMusicActivelyPlaying,
+            enter = fadeIn(),
+            exit = fadeOut()
+          ) {
+            DesktopCompactMusicWidget(
+              uiState = uiState,
+              metrics = metrics,
+              themeMode = uiState.themeMode,
+              borderColor = borderColor,
+              panelBg = panelBgElevated,
+              textPrimary = textPrimary,
+              textSecondary = textSecondary,
+              onToggleMediaPlayback = onToggleMediaPlayback,
+              onPreviousMediaTrack = onPreviousMediaTrack,
+              onNextMediaTrack = onNextMediaTrack,
+              onLaunchMusicApp = onLaunchMusicApp
+            )
+          }
+
+          if (hasAlert) {
+            HomeContextAlertCard(
+              uiState = uiState,
+              borderColor = borderColor,
+              onQuerySubmit = onQuerySubmit,
+              compactLandscapeMode = true,
+              landscapeMinWidth = metrics.mediaCardMinWidth,
+              landscapeMaxWidth = metrics.mediaCardMaxWidth,
+              landscapeHeight = metrics.mediaCardHeight,
+              landscapeIconBoxSize = metrics.mediaArtBoxSize,
+              landscapeTitleSp = metrics.mediaTitleSp,
+              landscapeSubtitleSp = metrics.mediaSubtitleSp
+            )
+          }
+        }
+      }
+
+      // 2. BOTTOM DESKTOP TASKBAR (Floating tablet-proportioned bar across the bottom)
       DesktopTaskbar(
         uiState = uiState,
+        metrics = metrics,
         isLight = isLight,
         borderColor = borderColor,
         panelBg = panelBg,
@@ -275,7 +437,10 @@ fun DesktopLandscapeHomeScreen(
         modifier = Modifier
           .align(Alignment.BottomCenter)
           .fillMaxWidth()
-          .padding(horizontal = 10.dp, vertical = 4.dp)
+          .padding(
+            horizontal = metrics.taskbarHorizontalMargin,
+            vertical = metrics.taskbarBottomMargin
+          )
       )
 
       // 3. START MENU OVERLAY (Opens above the taskbar at Start edge / Right in RTL)
@@ -297,10 +462,14 @@ fun DesktopLandscapeHomeScreen(
           exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 3 }),
           modifier = Modifier
             .align(Alignment.BottomStart)
-            .padding(start = 12.dp, bottom = 54.dp)
+            .padding(
+              start = metrics.taskbarHorizontalMargin,
+              bottom = metrics.reservedBottomPadding
+            )
         ) {
           DesktopStartMenu(
             uiState = uiState,
+            metrics = metrics,
             isLight = isLight,
             borderColor = borderColor,
             panelBg = panelBg,
@@ -321,7 +490,7 @@ fun DesktopLandscapeHomeScreen(
 }
 
 /**
- * Compact Desktop Music Player Widget (Upper-Left).
+ * Tablet-Proportional Desktop Music Player Widget (Upper-Left).
  * - Clicking artwork/icon launches original music app.
  * - Track title and artist with thin volume progress bar.
  * - Transport controls (Previous, circular cyan Play/Pause, Next).
@@ -330,6 +499,7 @@ fun DesktopLandscapeHomeScreen(
 @Composable
 private fun DesktopCompactMusicWidget(
   uiState: WeykyUiState,
+  metrics: DesktopTabletMetrics,
   themeMode: WeykyThemeMode,
   borderColor: Color,
   panelBg: Color,
@@ -351,9 +521,9 @@ private fun DesktopCompactMusicWidget(
   val artworkBitmap = mediaMeta?.artworkBitmap
 
   val cardShape: Shape = when {
-    isTactical -> CutCornerShape(6.dp)
-    isModern -> RoundedCornerShape(16.dp)
-    else -> RoundedCornerShape(10.dp)
+    isTactical -> CutCornerShape(8.dp)
+    isModern -> RoundedCornerShape(18.dp)
+    else -> RoundedCornerShape(12.dp)
   }
 
   val cardBg = when {
@@ -370,17 +540,17 @@ private fun DesktopCompactMusicWidget(
 
   Box(
     modifier = Modifier
-      .widthIn(min = 250.dp, max = 290.dp)
-      .height(56.dp)
-      .shadow(elevation = if (isModern) 10.dp else 6.dp, shape = cardShape)
+      .widthIn(min = metrics.mediaCardMinWidth, max = metrics.mediaCardMaxWidth)
+      .height(metrics.mediaCardHeight)
+      .shadow(elevation = if (isModern) 12.dp else 8.dp, shape = cardShape)
       .clip(cardShape)
       .background(cardBg)
       .border(
-        width = if (isTactical) 1.2.dp else 1.dp,
+        width = if (isTactical) 1.3.dp else 1.dp,
         color = cardBorder,
         shape = cardShape
       )
-      .padding(horizontal = 8.dp, vertical = 6.dp)
+      .padding(horizontal = 10.dp, vertical = 7.dp)
       .testTag("music_top_hud_card")
   ) {
     Row(
@@ -391,8 +561,8 @@ private fun DesktopCompactMusicWidget(
       // 1. Album Artwork / Icon (Clickable -> opens original music app!)
       Box(
         modifier = Modifier
-          .size(38.dp)
-          .clip(if (isTactical) CutCornerShape(4.dp) else RoundedCornerShape(8.dp))
+          .size(metrics.mediaArtBoxSize)
+          .clip(if (isTactical) CutCornerShape(5.dp) else RoundedCornerShape(10.dp))
           .clickable(onClick = onLaunchMusicApp)
           .testTag("music_album_art_button"),
         contentAlignment = Alignment.Center
@@ -422,13 +592,13 @@ private fun DesktopCompactMusicWidget(
               imageVector = Icons.Default.MusicNote,
               contentDescription = "فتح تطبيق الموسيقى الأصلي",
               tint = Color.White,
-              modifier = Modifier.size(20.dp)
+              modifier = Modifier.size(metrics.mediaArtBoxSize * 0.52f)
             )
           }
         }
       }
 
-      Spacer(modifier = Modifier.width(8.dp))
+      Spacer(modifier = Modifier.width(10.dp))
 
       // 2. Track Title, Artist, and Thin Volume Line
       Column(
@@ -440,7 +610,7 @@ private fun DesktopCompactMusicWidget(
         Text(
           text = trackTitle,
           color = textPrimary,
-          fontSize = 11.sp,
+          fontSize = metrics.mediaTitleSp,
           fontWeight = FontWeight.Bold,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
@@ -449,60 +619,60 @@ private fun DesktopCompactMusicWidget(
         Text(
           text = trackArtist,
           color = textSecondary,
-          fontSize = 9.sp,
+          fontSize = metrics.mediaSubtitleSp,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
           fontFamily = if (isTactical) FontFamily.Monospace else FontFamily.SansSerif
         )
 
-        Spacer(modifier = Modifier.height(3.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Subtle cyan volume / progress bar
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(4.dp)
+          horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
           Icon(
             imageVector = Icons.Default.VolumeUp,
             contentDescription = "مستوى الصوت",
             tint = Color(0xFF00F0FF).copy(alpha = 0.8f),
-            modifier = Modifier.size(10.dp)
+            modifier = Modifier.size(12.dp)
           )
           Box(
             modifier = Modifier
-              .width(44.dp)
-              .height(2.5.dp)
-              .clip(RoundedCornerShape(1.dp))
+              .width(56.dp)
+              .height(3.dp)
+              .clip(RoundedCornerShape(1.5.dp))
               .background(Color(0xFF00F0FF).copy(alpha = 0.7f))
           )
         }
       }
 
-      Spacer(modifier = Modifier.width(6.dp))
+      Spacer(modifier = Modifier.width(8.dp))
 
       // 3. Transport Controls: [ Previous | (Play/Pause) | Next ]
       Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
       ) {
         IconButton(
           onClick = onPreviousMediaTrack,
           modifier = Modifier
-            .size(28.dp)
+            .size(metrics.mediaTransportButtonSize)
             .testTag("music_prev_button")
         ) {
           Icon(
             imageVector = Icons.Default.SkipPrevious,
             contentDescription = "المقطع السابق",
             tint = Color(0xFF00F0FF),
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(metrics.mediaTransportButtonSize * 0.62f)
           )
         }
 
         // Circular Cyan Play/Pause button
         Box(
           modifier = Modifier
-            .size(32.dp)
+            .size(metrics.mediaPlayButtonSize)
             .clip(CircleShape)
             .background(Color(0xFF00F0FF).copy(alpha = 0.15f))
             .border(1.5.dp, Color(0xFF00F0FF), CircleShape)
@@ -514,21 +684,21 @@ private fun DesktopCompactMusicWidget(
             imageVector = if (isMusicActivelyPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
             contentDescription = if (isMusicActivelyPlaying) "إيقاف مؤقت" else "تشغيل",
             tint = Color(0xFF00F0FF),
-            modifier = Modifier.size(16.dp)
+            modifier = Modifier.size(metrics.mediaPlayButtonSize * 0.52f)
           )
         }
 
         IconButton(
           onClick = onNextMediaTrack,
           modifier = Modifier
-            .size(28.dp)
+            .size(metrics.mediaTransportButtonSize)
             .testTag("music_next_button")
         ) {
           Icon(
             imageVector = Icons.Default.SkipNext,
             contentDescription = "المقطع التالي",
             tint = Color(0xFF00F0FF),
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(metrics.mediaTransportButtonSize * 0.62f)
           )
         }
       }
@@ -537,14 +707,15 @@ private fun DesktopCompactMusicWidget(
 }
 
 /**
- * Compact Top Information Pills:
- * [ 📍 موقعي الحالي ]  [ ☀️ 14° غائم ]  [ الجمعة، 23 أكتوبر 📅 ]
+ * Tablet-Proportional Top Information Pills:
+ * [ 📍 موقعي الحالي ]  [ ☀️ 14° غائم ]
  * Fully interactive: Clicking any pill speaks its details through the WEYKY Core!
  * Reacts to all 3 themes (Tactical HUD, Modern, Minimal).
  */
 @Composable
 private fun DesktopCompactInfoPills(
   uiState: WeykyUiState,
+  metrics: DesktopTabletMetrics,
   themeMode: WeykyThemeMode,
   borderColor: Color,
   panelBg: Color,
@@ -558,9 +729,9 @@ private fun DesktopCompactInfoPills(
   val isModern = themeMode == WeykyThemeMode.MODERN
 
   val pillShape: Shape = when {
-    isTactical -> CutCornerShape(4.dp)
-    isModern -> RoundedCornerShape(16.dp)
-    else -> RoundedCornerShape(8.dp)
+    isTactical -> CutCornerShape(6.dp)
+    isModern -> RoundedCornerShape(18.dp)
+    else -> RoundedCornerShape(10.dp)
   }
 
   val pillBg = when {
@@ -582,42 +753,45 @@ private fun DesktopCompactInfoPills(
     "14°"
   }
   val conditionText = weather?.condition ?: "غائم"
-  val locationText = weather?.locationName?.takeIf { it.isNotBlank() } ?: "موقعي الحالي"
-  val dateText = uiState.currentDateString.ifBlank { "الجمعة، 23 أكتوبر" }
-  val engDateText = uiState.currentEnglishDateString.ifBlank { "FRIDAY, 23 OCTOBER 2026" }
+  val locationText = weather?.locationName
+    ?.takeIf { it.isNotBlank() && it != "موقعي الحالي" }
+    ?: "جاري تحديد المنطقة..."
 
   Row(
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    horizontalArrangement = Arrangement.spacedBy(10.dp),
     verticalAlignment = Alignment.CenterVertically
   ) {
-    // 1. Location Pill: [ 📍 موقعي الحالي ] -> Clickable: speaks location
+    // 1. Location Pill: [ 📍 اسم المنطقة الجغرافية ] -> Clickable: speaks location
     Row(
       modifier = Modifier
-        .height(36.dp)
+        .height(metrics.topPillHeight)
+        .widthIn(max = metrics.topLocationMaxWidth)
         .clip(pillShape)
         .background(pillBg)
         .border(
-          width = if (isTactical) 1.2.dp else 1.dp,
+          width = if (isTactical) 1.3.dp else 1.dp,
           color = pillBorder,
           shape = pillShape
         )
         .clickable(onClick = onLocationClick)
-        .padding(horizontal = 10.dp)
+        .padding(horizontal = 14.dp)
         .testTag("desktop_location_pill"),
       verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(6.dp)
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
       Icon(
         imageVector = Icons.Default.LocationOn,
         contentDescription = "الموقع الحالي",
         tint = Color(0xFF00F0FF),
-        modifier = Modifier.size(14.dp)
+        modifier = Modifier.size(metrics.topPillIconSize)
       )
       Text(
         text = locationText,
         color = textPrimary,
-        fontSize = 11.sp,
+        fontSize = metrics.topPillPrimarySp,
         fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         fontFamily = if (isTactical) FontFamily.Monospace else FontFamily.SansSerif
       )
     }
@@ -625,86 +799,39 @@ private fun DesktopCompactInfoPills(
     // 2. Weather Pill: [ ☀️ 14° غائم ] -> Clickable: speaks weather
     Row(
       modifier = Modifier
-        .height(36.dp)
+        .height(metrics.topPillHeight)
         .clip(pillShape)
         .background(pillBg)
         .border(
-          width = if (isTactical) 1.2.dp else 1.dp,
+          width = if (isTactical) 1.3.dp else 1.dp,
           color = pillBorder,
           shape = pillShape
         )
         .clickable(onClick = onWeatherClick)
-        .padding(horizontal = 10.dp)
+        .padding(horizontal = 14.dp)
         .testTag("desktop_weather_pill"),
       verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(6.dp)
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
       Icon(
         imageVector = if (conditionText.contains("مطر")) Icons.Default.Cloud else Icons.Default.WbSunny,
         contentDescription = "الطقس",
         tint = Color(0xFF00F0FF),
-        modifier = Modifier.size(16.dp)
+        modifier = Modifier.size(metrics.topPillIconSize)
       )
       Text(
         text = tempText,
         color = textPrimary,
-        fontSize = 13.sp,
+        fontSize = metrics.topPillTempSp,
         fontWeight = FontWeight.Bold,
         fontFamily = if (isTactical) FontFamily.Monospace else FontFamily.SansSerif
       )
       Text(
         text = conditionText,
         color = textSecondary,
-        fontSize = 11.sp,
+        fontSize = metrics.topPillPrimarySp,
         fontFamily = if (isTactical) FontFamily.Monospace else FontFamily.SansSerif
       )
-    }
-
-    // 3. Date Pill: [ الجمعة، 23 أكتوبر 📅 ] -> Clickable: speaks date
-    Row(
-      modifier = Modifier
-        .height(36.dp)
-        .clip(pillShape)
-        .background(pillBg)
-        .border(
-          width = if (isTactical) 1.2.dp else 1.dp,
-          color = pillBorder,
-          shape = pillShape
-        )
-        .clickable(onClick = onDateClick)
-        .padding(horizontal = 10.dp, vertical = 2.dp)
-        .testTag("desktop_date_pill"),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-      Icon(
-        imageVector = Icons.Default.CalendarToday,
-        contentDescription = "التاريخ",
-        tint = Color(0xFF00F0FF),
-        modifier = Modifier.size(14.dp)
-      )
-
-      Column(
-        horizontalAlignment = Alignment.Start,
-        verticalArrangement = Arrangement.Center
-      ) {
-        Text(
-          text = dateText,
-          color = textPrimary,
-          fontSize = 10.sp,
-          fontWeight = FontWeight.Bold,
-          maxLines = 1,
-          fontFamily = if (isTactical) FontFamily.Monospace else FontFamily.SansSerif
-        )
-        Text(
-          text = engDateText.uppercase(),
-          color = textSecondary.copy(alpha = 0.8f),
-          fontSize = 7.5.sp,
-          fontWeight = FontWeight.Normal,
-          maxLines = 1,
-          fontFamily = if (isTactical) FontFamily.Monospace else FontFamily.SansSerif
-        )
-      }
     }
   }
 }

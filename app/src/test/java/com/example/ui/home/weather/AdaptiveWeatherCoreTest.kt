@@ -112,4 +112,65 @@ class AdaptiveWeatherCoreTest {
     assertEquals(null, parseTimeToMinutes(""))
     assertEquals(null, parseTimeToMinutes(null))
   }
+
+  @Test
+  fun `hasCloudsInWeather returns false for clear sky and true for cloudy or rainy conditions`() {
+    val clearSky = WeatherSnapshot(temperatureCelsius = 25f, condition = "صافٍ مشمس", weatherCode = 0, cloudCoverPercent = 5)
+    assertFalse(hasCloudsInWeather(clearSky))
+
+    val partlyCloudy = WeatherSnapshot(temperatureCelsius = 22f, condition = "غائم جزئياً", weatherCode = 2, cloudCoverPercent = 45)
+    assertTrue(hasCloudsInWeather(partlyCloudy))
+
+    val overcast = WeatherSnapshot(temperatureCelsius = 19f, condition = "غائم كلياً", weatherCode = 3, cloudCoverPercent = 90)
+    assertTrue(hasCloudsInWeather(overcast))
+
+    val rainy = WeatherSnapshot(temperatureCelsius = 16f, condition = "ممطر", weatherCode = 61, cloudCoverPercent = 85)
+    assertTrue(hasCloudsInWeather(rainy))
+  }
+
+  @Test
+  fun `calculateLunarAstronomy resolves all known lunar phases and appearance window`() {
+    val referenceNewMoonMs = 947182440000L
+    val synodicMonthMs = (29.530588853 * 86400000.0).toLong()
+    val weather = WeatherSnapshot(
+      temperatureCelsius = 20f,
+      condition = "صافٍ",
+      sunriseToday = "06:00",
+      sunsetToday = "18:30"
+    )
+
+    // 1. Full Moon (cyclePhase = 0.5) at 23:00 night -> visible white full moon
+    val fullMoonCal = java.util.Calendar.getInstance().apply {
+      timeInMillis = referenceNewMoonMs + (synodicMonthMs / 2)
+      set(java.util.Calendar.HOUR_OF_DAY, 23)
+      set(java.util.Calendar.MINUTE, 0)
+    }
+    val fullMoonAstro = calculateLunarAstronomy(weather, fullMoonCal)
+    assertEquals(LunarPhaseType.FULL_MOON, fullMoonAstro.phaseType)
+    assertTrue(fullMoonAstro.illuminationFraction > 0.95f)
+    assertTrue(fullMoonAstro.isMoonInAppearanceWindow)
+    assertTrue(fullMoonAstro.isMoonVisibleAtNight)
+
+    // 2. First Quarter (cyclePhase = 0.25) at 21:00 night -> visible half moon
+    val firstQuarterCal = java.util.Calendar.getInstance().apply {
+      timeInMillis = referenceNewMoonMs + (synodicMonthMs / 4)
+      set(java.util.Calendar.HOUR_OF_DAY, 21)
+      set(java.util.Calendar.MINUTE, 0)
+    }
+    val fqAstro = calculateLunarAstronomy(weather, firstQuarterCal)
+    assertEquals(LunarPhaseType.FIRST_QUARTER, fqAstro.phaseType)
+    assertTrue(fqAstro.illuminationFraction in 0.40f..0.60f)
+    assertTrue(fqAstro.isMoonInAppearanceWindow)
+
+    // 3. New Moon (cyclePhase = 0.0) -> not visible at night
+    val newMoonCal = java.util.Calendar.getInstance().apply {
+      timeInMillis = referenceNewMoonMs
+      set(java.util.Calendar.HOUR_OF_DAY, 23)
+      set(java.util.Calendar.MINUTE, 0)
+    }
+    val newMoonAstro = calculateLunarAstronomy(weather, newMoonCal)
+    assertEquals(LunarPhaseType.NEW_MOON, newMoonAstro.phaseType)
+    assertFalse(newMoonAstro.isMoonInAppearanceWindow)
+    assertFalse(newMoonAstro.isMoonVisibleAtNight)
+  }
 }

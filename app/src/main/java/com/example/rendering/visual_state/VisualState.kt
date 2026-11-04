@@ -16,11 +16,11 @@ enum class CoreVisualState(
 ) {
   IDLE(
     displayName = "Ambient Idle",
-    primaryColor = Color(0xFF0F3460), // Deep blue
-    secondaryColor = Color(0xFF16213E), // Midnight blue
-    accentColor = Color(0xFF00ADB5), // Cyan/Turquoise
+    primaryColor = Color(0xFFF59E0B), // Golden amber sun
+    secondaryColor = Color(0xFFD97706), // Deep warm solar gold
+    accentColor = Color(0xFFFDE047), // Radiant golden-yellow sun
     speedMultiplier = 0.5f,
-    glowIntensity = 0.45f
+    glowIntensity = 0.88f
   ),
   CHARGING(
     displayName = "Power Charging",
